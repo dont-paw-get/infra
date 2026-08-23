@@ -1,0 +1,15 @@
+# Grafana Alerting provisioning: Discord contact point
+# 배포 시 grafana sidecar(provisioning) 또는 grafana ConfigMap으로 마운트한다.
+# 실제 웹훅 URL은 여기 두지 않는다 — secrets/README.md 참고 (K8s Secret에서 값 주입).
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: discord-webhook
+    receivers:
+      - uid: discord-webhook-receiver
+        type: discord
+        settings:
+          url: "${DISCORD_WEBHOOK_URL}"
+          use_discord_username: false
+        disableResolveMessage: false

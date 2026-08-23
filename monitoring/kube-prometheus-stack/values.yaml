@@ -1,0 +1,66 @@
+# prometheus-community/kube-prometheus-stack
+# ADR-0001 결정 사항 반영: Alertmanager 대신 Grafana Alerting 사용, ServiceMonitor는 각 서비스 저장소가 소유.
+
+alertmanager:
+  # Grafana Alerting(Discord contact point)으로 알림을 처리하므로 Alertmanager는 비활성화한다.
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    # 서비스 저장소들이 자신의 네임스페이스에 두는 ServiceMonitor/PodMonitor를 모두 스크레이핑 대상으로 인식한다.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+    # TODO(open issue, ADR-0001): 보존 기간/스토리지 용량 확정 전까지의 임시값.
+    retention: 15d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+kube-state-metrics:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+
+grafana:
+  grafana.ini:
+    unified_alerting:
+      enabled: true
+    alerting:
+      enabled: false # legacy alerting 비활성화 (unified alerting 사용)
+
+  # Loki를 두 번째 데이터소스로 등록한다. uid를 고정해 alerting 규칙(monitoring/alerting/rules)에서 참조한다.
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki-gateway.monitoring.svc.cluster.local
+      jsonData:
+        maxLines: 1000
+
+  # monitoring/alerting/ 하위 YAML을 ConfigMap(label: grafana_alert=1)으로 만들어두면
+  # 이 sidecar가 자동으로 읽어 /etc/grafana/provisioning/alerting/에 반영한다.
+  # (scripts/install.sh 참고)
+  sidecar:
+    alerts:
+      enabled: true
+      label: grafana_alert
+      labelValue: "1"
+      searchNamespace: monitoring
+
+  # TODO(open issue, ADR-0001): 외부 노출 방식(Ingress)과 인증 방식 확정 전까지 비활성화.
+  ingress:
+    enabled: false
+
+  # TODO(open issue, ADR-0001): admin 비밀번호를 여기 두지 않는다. secrets/README.md 참고.
+  admin:
+    existingSecret: "grafana-admin-credentials"
+    userKey: admin-user
+    passwordKey: admin-password

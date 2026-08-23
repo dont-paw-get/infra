@@ -1,0 +1,11 @@
+# Grafana Alerting provisioning: 모든 알림을 discord-webhook 연락처로 라우팅한다.
+# 알림이 늘어나면 서비스/심각도별 route를 세분화한다.
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: discord-webhook
+    group_by: ["alertname", "namespace"]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h

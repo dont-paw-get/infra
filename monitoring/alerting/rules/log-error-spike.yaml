@@ -1,0 +1,37 @@
+# Grafana Alerting provisioning: Loki 로그 ERROR 패턴 급증
+# 애플리케이션이 구조화 로그(JSON)에 level=ERROR 필드를 출력한다고 가정.
+# TODO(open issue, ADR-0001): threshold(분당 5건)는 러프한 초기값.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: log-error-spike
+    folder: Cluster Alerts
+    interval: 1m
+    rules:
+      - uid: log-error-spike
+        title: "로그 ERROR 급증"
+        condition: C
+        for: 5m
+        data:
+          - refId: A
+            datasourceUid: loki
+            model:
+              expr: |
+                sum by (app) (count_over_time({namespace=~".+"} | json | level="ERROR" [5m]))
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [5]
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.app }} 서비스에서 ERROR 로그가 급증했습니다"

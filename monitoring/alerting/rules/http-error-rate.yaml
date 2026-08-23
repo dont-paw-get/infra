@@ -1,0 +1,40 @@
+# Grafana Alerting provisioning: HTTP 5xx 에러율
+# datasourceUid "prometheus"는 kube-prometheus-stack이 자동 생성하는 기본 Prometheus 데이터소스의 uid다.
+# 대상 메트릭(http_server_requests_seconds_count)은 Micrometer 기준 이름 — 서비스가 다른 클라이언트를 쓰면 조정 필요.
+# TODO(open issue, ADR-0001): threshold(0.05 = 5%)는 러프한 초기값. 트래픽 파악 후 튜닝.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: http-error-rate
+    folder: Cluster Alerts
+    interval: 1m
+    rules:
+      - uid: http-5xx-error-rate
+        title: "HTTP 5xx 에러율 초과"
+        condition: C
+        for: 5m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            model:
+              expr: |
+                sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (application)
+                /
+                sum(rate(http_server_requests_seconds_count[5m])) by (application)
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.05]
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.application }} 서비스의 5xx 에러율이 5%를 초과했습니다"

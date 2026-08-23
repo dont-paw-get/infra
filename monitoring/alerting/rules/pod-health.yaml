@@ -1,0 +1,62 @@
+# Grafana Alerting provisioning: CrashLoopBackOff / OOMKilled
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: pod-health
+    folder: Cluster Alerts
+    interval: 1m
+    rules:
+      - uid: pod-crash-loop-backoff
+        title: "파드 CrashLoopBackOff"
+        condition: C
+        for: 2m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            model:
+              expr: |
+                kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} == 1
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} 파드가 CrashLoopBackOff 상태입니다"
+
+      - uid: pod-oom-killed
+        title: "파드 OOMKilled"
+        condition: C
+        for: 0m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            model:
+              expr: |
+                kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0]
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.pod }} 파드가 OOMKilled로 종료되었습니다"
