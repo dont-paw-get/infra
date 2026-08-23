@@ -28,6 +28,16 @@
   - `monitoring/alerting/rules/log-error-spike.yaml` — 분당 ERROR 로그 5건
 - [ ] 알림이 늘어나면 `monitoring/alerting/policies/notification-policy.yaml`의 단일 라우팅을 서비스/심각도별로 세분화
 
+## 이상탐지/근본원인분석(RCA) Agent 도입 (결정 완료 — ADR 작성 대기)
+
+Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받아 RCA를 수행하고 Discord에 보고하는 Agent를 `monitoring` 네임스페이스(공유 인프라)에 추가한다. 결정 근거와 배경은 `docs/adr/0002-anomaly-rca-agent.md` 참고.
+
+**남은 작업 (구현 단계)**
+- [ ] Grafana Alerting에 Agent용 webhook 통합 추가 (기존 `discord-webhook` contact point에 webhook 통합 추가하는 방식으로 시작, 문제 생기면 별도 contact point로 분리)
+- [ ] Agent 배포 스캐폴딩: Strands SDK 애플리케이션 소스 + Dockerfile + K8s manifest/Helm values (`monitoring` 네임스페이스)
+- [ ] IRSA 설정 (ServiceAccount ↔ IAM Role ↔ Bedrock 권한) — EKS 클러스터의 OIDC 프로바이더 정보 필요
+- [ ] Agent → Prometheus/Loki 내부 접근: 기존 Alloy와 동일하게 클러스터 내부 서비스 DNS로 접근 (별도 인증 없음, 네임스페이스 내부 통신)
+
 ## 배포 운영
 
 - [ ] GitOps 도구(ArgoCD/Flux) 도입 여부 결정 — 현재는 `scripts/install.sh` 수동/CI 실행 전제

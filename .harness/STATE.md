@@ -8,3 +8,4 @@
 - [x] `scripts/install.sh` 작성: `.env` 검증 → 네임스페이스/Secret 생성 → alerting ConfigMap 생성 → Helm 3종 설치
 - [x] `CLAUDE.md` 크로스 툴 하네스 워크플로 문서 작성 (backend-book 오염 내용 제거, infra 저장소 기준으로 재작성)
 - [x] `.harness/` 스캐폴딩 (이 문서 포함 6종)
+- [x] 이상탐지/RCA Agent 도입 결정: Strands SDK + Amazon Bedrock, Grafana Alerting webhook 트리거 기반, read-only 분석/보고 전용, `monitoring` 네임스페이스에 소스 포함 배포, Bedrock 인증은 IRSA — `docs/adr/0002-anomaly-rca-agent.md`
