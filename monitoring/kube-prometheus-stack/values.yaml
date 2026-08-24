@@ -47,7 +47,7 @@ grafana:
 
   # monitoring/alerting/ 하위 YAML을 ConfigMap(label: grafana_alert=1)으로 만들어두면
   # 이 sidecar가 자동으로 읽어 /etc/grafana/provisioning/alerting/에 반영한다.
-  # (scripts/install.sh 참고)
+  # (monitoring/alerting/kustomization.yaml이 ConfigMap을 생성한다 — docs/adr/0003-argocd-gitops.md)
   sidecar:
     alerts:
       enabled: true
@@ -55,11 +55,20 @@ grafana:
       labelValue: "1"
       searchNamespace: monitoring
 
+  # monitoring/alerting/contact-points/discord.yaml의 $__env{DISCORD_WEBHOOK_URL} 참조용.
+  # discord-webhook Secret은 ExternalSecret이 생성한다 (monitoring/external-secrets/discord-webhook.yaml).
+  envValueFrom:
+    DISCORD_WEBHOOK_URL:
+      secretKeyRef:
+        name: discord-webhook
+        key: url
+
   # TODO(open issue, ADR-0001): 외부 노출 방식(Ingress)과 인증 방식 확정 전까지 비활성화.
   ingress:
     enabled: false
 
-  # TODO(open issue, ADR-0001): admin 비밀번호를 여기 두지 않는다. secrets/README.md 참고.
+  # admin 비밀번호는 ExternalSecret이 생성하는 grafana-admin-credentials Secret을 참조한다.
+  # (monitoring/external-secrets/grafana-admin-credentials.yaml, secrets/README.md 참고)
   admin:
     existingSecret: "grafana-admin-credentials"
     userKey: admin-user

@@ -38,27 +38,18 @@ Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받
 - [ ] IRSA 설정 (ServiceAccount ↔ IAM Role ↔ Bedrock 권한) — EKS 클러스터의 OIDC 프로바이더 정보 필요
 - [ ] Agent → Prometheus/Loki 내부 접근: 기존 Alloy와 동일하게 클러스터 내부 서비스 DNS로 접근 (별도 인증 없음, 네임스페이스 내부 통신)
 
-## GitOps 전환: ArgoCD 도입 (결정 완료 — 계획 초안, 구현 착수 전 컨펌 대기)
+## GitOps 전환: ArgoCD 도입 (구현 완료 — 부트스트랩 전 남은 값 채우기만 대기)
 
-결정 사항 (사용자 확인 완료):
-- ArgoCD 자체 설치는 이 저장소 범위 밖 — 클러스터에 이미 준비됨/별도 관리
-- Application 매니페스트는 이 저장소 안에 두되, App-of-Apps 루트 없이 **개별(flat) 등록** — 릴리스별 Application CR을 각각 직접 `kubectl apply`(최초 1회)로 등록
-- Sync 정책: automated (self-heal + prune)
-- 시크릿(Discord 웹훅 URL, Grafana admin 비밀번호)은 External Secrets Operator를 도입해 선언적으로 관리 — `.env` + `install.sh` 수동 생성 방식 폐지
-- 서비스 저장소(`backend-book` 등)도 추후 ArgoCD로 전환할 계획 (범위·시점은 별도 논의 — 아래 미결정 참고). Flat으로 시작하지만 앱 개수가 늘어나면 ApplicationSet 전환도 후보 (지금은 3개 릴리스라 불필요)
+결정/구현 내역은 `docs/adr/0003-argocd-gitops.md` 참고. `backend-auth` 저장소(ArgoCD+Kustomize, `targetRevision: develop`, `finalizers`)의 실제 컨벤션을 확인하고 동일하게 맞췄다.
 
-**구현 체크리스트 (초안)**
-- [ ] `docs/adr/0003-argocd-gitops.md` 작성 — ADR-0001의 "GitOps 도구 도입 여부"·"시크릿 관리 방식" 미결정 항목을 이 결정으로 해소, flat Application 등록 방식 선택 근거 포함
-- [ ] External Secrets Operator 도입: `SecretStore`/`ClusterSecretStore` 연동 대상(AWS Secrets Manager 등) 확정 → `monitoring/`에 `ExternalSecret` 리소스 추가해 `grafana-admin-credentials`, `discord-webhook` Secret을 대체
-- [ ] 알림 provisioning YAML(`monitoring/alerting/*/*.yaml`)의 `${DISCORD_WEBHOOK_URL}` envsubst 치환 방식을 ExternalSecret 참조로 교체
-- [ ] `monitoring/argocd/`에 릴리스별 Application CR 3종 작성 (`kube-prometheus-stack.yaml`, `loki.yaml`, `alloy.yaml`, 루트 없음) — 각각 기존 `monitoring/*/values.yaml`을 `valueFiles`로 참조, syncPolicy는 automated+selfHeal+prune
-- [ ] `scripts/install.sh` 폐지 또는 대폭 축소 — 네임스페이스 생성 정도만 남기고 Helm 설치·Secret 생성·envsubst 로직 제거 (ArgoCD+ESO가 대체). 대신 최초 1회 `monitoring/argocd/*.yaml` 3종을 `kubectl apply`하는 안내/스크립트 필요
-- [ ] `.harness/ARCHITECTURE.md` 갱신: 배포 방식(ArgoCD 관리, flat Application), 시크릿 관리 방식(ESO) 반영
-- [ ] `secrets/README.md` 갱신: `.env` 방식 → ESO 방식으로 정책 변경
+**부트스트랩(최초 클러스터 적용) 전 채워야 하는 값**
+- [ ] `monitoring/argocd/external-secrets.yaml`, `kube-prometheus-stack.yaml`, `loki.yaml`의 `targetRevision: "<CHART_VERSION>"`을 실제 Helm 차트 버전으로 고정 (`helm search repo <chart>`로 최신 안정 버전 확인)
+- [ ] `monitoring/external-secrets/service-account.yaml`의 `eks.amazonaws.com/role-arn: "arn:aws:iam::<ACCOUNT_ID>:role/dpgy-infra-external-secrets"`를 실제 AWS 계정 ID로 교체 — RCA Agent(ADR-0002)의 IRSA와 함께 한 번에 정리 권장
+- [ ] AWS Secrets Manager에 `dpgy-infra/grafana-admin-credentials`(JSON: admin-user/admin-password), `dpgy-infra/discord-webhook`(plaintext) 시크릿 값 생성 (AWS 콘솔/CLI, 이 저장소 범위 밖)
+- [ ] `helm template`으로 `monitoring/kube-prometheus-stack/values.yaml` 렌더링 검증 — 로컬에 Helm CLI가 없어 이번 세션에서는 YAML 문법 검증만 수행함 (`kubectl kustomize`로 alerting Kustomize는 렌더링 검증 완료)
 
-**구현 전 추가로 확인이 필요한 점 (사용자 결정 필요, 착수 시점에 재논의):**
-- [ ] External Secrets Operator가 참조할 외부 시크릿 저장소 확정 (AWS Secrets Manager / Parameter Store 등 — 클러스터가 EKS인지, IRSA 연동 가능한지 확인 필요. RCA Agent 항목에서 IRSA를 이미 전제하고 있어 같은 방식 재사용 가능해 보임)
-- [ ] 서비스 저장소까지 포함할 때 Application을 어디(이 저장소/별도 저장소)에 어떤 방식(flat 유지/ApplicationSet 전환)으로 둘지 — 서비스 저장소 전환 착수 시점에 결정 (지금 관측 스택 전환 자체를 막는 항목은 아님)
+**추후 논의 (착수를 막지 않음)**
+- [ ] 서비스 저장소(`backend-book` 등)까지 이 저장소의 ArgoCD Application으로 관리할지, 별도로 둘지
 
 ## 서비스 저장소 연동
 

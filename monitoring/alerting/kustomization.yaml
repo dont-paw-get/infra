@@ -1,0 +1,35 @@
+# 기존 provisioning YAML(원본 내용은 그대로 두고)을 grafana_alert=1 라벨의 ConfigMap으로 감싼다.
+# kube-prometheus-stack의 grafana sidecar.alerts가 이 라벨을 감시해 자동으로 provisioning에 반영한다.
+# 과거 scripts/install.sh의 envsubst + kubectl create configmap 로직을 대체 (docs/adr/0003-argocd-gitops.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitoring
+
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_alert: "1"
+
+configMapGenerator:
+  - name: grafana-alerting-discord
+    files:
+      - contact-points/discord.yaml
+  - name: grafana-alerting-notification-policy
+    files:
+      - policies/notification-policy.yaml
+  - name: grafana-alerting-http-error-rate
+    files:
+      - rules/http-error-rate.yaml
+  - name: grafana-alerting-latency
+    files:
+      - rules/latency.yaml
+  - name: grafana-alerting-log-error-spike
+    files:
+      - rules/log-error-spike.yaml
+  - name: grafana-alerting-pod-health
+    files:
+      - rules/pod-health.yaml
+  - name: grafana-alerting-pvc-usage
+    files:
+      - rules/pvc-usage.yaml

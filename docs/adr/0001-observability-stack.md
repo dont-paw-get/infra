@@ -39,6 +39,6 @@ Organization은 여러 서비스로 구성된 MSA(Book Service, Python RAG Servi
 
 - Prometheus/Loki 데이터 보존 기간과 PVC 스토리지 용량
 - Grafana 외부 노출 방식(Ingress)과 인증 방식
-- 시크릿 관리 방식 최종 확정 (K8s Secret 수동 생성 vs External Secrets Operator 등)
+- ~~시크릿 관리 방식 최종 확정~~ → `docs/adr/0003-argocd-gitops.md`에서 해소 (External Secrets Operator + AWS Secrets Manager)
 - 알림 규칙(threshold) 초기값 튜닝 — 트래픽 규모 파악 전이므로 러프한 기본값으로 시작
-- GitOps 도구(ArgoCD/Flux) 도입 여부 — 현재는 `helm upgrade --install`을 수동/CI로 실행하는 것을 전제로 함
+- ~~GitOps 도구(ArgoCD/Flux) 도입 여부~~ → `docs/adr/0003-argocd-gitops.md`에서 해소 (ArgoCD)

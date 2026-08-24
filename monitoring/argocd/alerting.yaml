@@ -1,0 +1,25 @@
+# Grafana Alerting provisioning ConfigMap (monitoring/alerting/, Kustomize configMapGenerator).
+# Grafana(grafana.envValueFrom의 DISCORD_WEBHOOK_URL)가 참조하는 discord-webhook Secret(wave -1)에
+# 의존하므로 wave 0으로 둔다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grafana-alerting
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dont-paw-get/infra.git
+    targetRevision: develop
+    path: monitoring/alerting
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true

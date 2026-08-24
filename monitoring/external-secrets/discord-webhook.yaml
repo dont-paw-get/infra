@@ -1,0 +1,22 @@
+# AWS Secrets Manager의 dpgy-infra/discord-webhook 시크릿(plaintext, 웹훅 URL)을
+# discord-webhook K8s Secret(key: url)으로 동기화한다.
+# kube-prometheus-stack values.yaml의 grafana.envValueFrom이 이 Secret을 Grafana 파드의
+# DISCORD_WEBHOOK_URL 환경변수로 주입하고, monitoring/alerting/contact-points/discord.yaml이
+# $__env{DISCORD_WEBHOOK_URL}로 참조한다.
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: discord-webhook
+  namespace: monitoring
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  target:
+    name: discord-webhook
+    creationPolicy: Owner
+  data:
+    - secretKey: url
+      remoteRef:
+        key: dpgy-infra/discord-webhook
