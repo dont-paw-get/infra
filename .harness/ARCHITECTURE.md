@@ -29,7 +29,7 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 
 ## 로그
 
-- Loki는 SingleBinary 모드, filesystem 스토리지(임시), 보존 336h(14d) — `.harness/PLAN.md`의 미결정 항목.
+- Loki는 SingleBinary 모드, filesystem 스토리지(임시), 보존 336h(14d) — `.harness/PLAN.md`의 미결정 항목. SimpleScalable 타겟(`read`/`write`/`backend`)은 차트 기본 replicas(3)와 SingleBinary 모드가 충돌하므로 명시적으로 0으로 둔다.
 - Alloy가 DaemonSet으로 모든 노드에서 컨테이너 stdout을 수집해 `loki-gateway.monitoring.svc.cluster.local`로 전송한다.
 - 애플리케이션은 stdout에 JSON 구조화 로그(`level` 필드 포함)를 출력해야 `monitoring/alerting/rules/log-error-spike.yaml`의 LogQL이 동작한다.
 

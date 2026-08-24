@@ -13,8 +13,8 @@ spec:
   sources:
     - repoURL: https://grafana.github.io/helm-charts
       chart: loki
-      # TODO(docs/adr/0003-argocd-gitops.md 미결정): 최초 부트스트랩 시 최신 안정 버전으로 고정.
-      targetRevision: "<CHART_VERSION>"
+      # artifacthub.io 기준 2026-08-24 확인한 최신 안정 버전. 이후 갱신 시 `helm search repo grafana/loki`로 재확인.
+      targetRevision: "7.3.0"
       helm:
         valueFiles:
           - $values/monitoring/loki/values.yaml

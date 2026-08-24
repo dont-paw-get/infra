@@ -33,6 +33,15 @@ singleBinary:
     enabled: true
     size: 20Gi
 
+# SimpleScalable 타겟(read/write/backend)은 차트 기본값이 replicas: 3이라
+# deploymentMode: SingleBinary와 함께 두면 `helm template`이 검증 에러를 낸다 — 명시적으로 0으로 둔다.
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
 gateway:
   enabled: true
 
