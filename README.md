@@ -28,6 +28,7 @@ monitoring/
     policies/                   알림 라우팅 정책
     rules/                      알림 규칙 (5xx 에러율, p99 레이턴시, 파드 상태, PVC, 로그 ERROR 급증)
   external-secrets/             ClusterSecretStore, IRSA ServiceAccount, ExternalSecret 2종
+  rca-agent/                    이상탐지/RCA Agent (Strands SDK + Bedrock) 소스 + Dockerfile + K8s manifest
 secrets/README.md               시크릿 관리 정책 (실제 시크릿은 커밋하지 않음)
 scripts/install.sh              최초 부트스트랩 스크립트 (네임스페이스 + ArgoCD Application 등록)
 ```
@@ -43,5 +44,5 @@ scripts/install.sh              최초 부트스트랩 스크립트 (네임스�
 ## 미해결 이슈
 
 체크리스트는 `.harness/PLAN.md` 참고 — 데이터 보존 기간, Grafana 외부 노출/인증, 알림 threshold 튜닝,
-ArgoCD Application의 Helm 차트 버전 고정, IRSA IAM Role 실제 값 채우기. 결정 배경/근거는
-`docs/adr/0001-observability-stack.md`, `docs/adr/0003-argocd-gitops.md`.
+IRSA IAM Role 실제 생성(External Secrets/RCA Agent), RCA Agent 이미지 빌드 파이프라인. 결정 배경/근거는
+`docs/adr/0001-observability-stack.md`, `docs/adr/0002-anomaly-rca-agent.md`, `docs/adr/0003-argocd-gitops.md`.

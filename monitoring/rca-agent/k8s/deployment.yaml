@@ -1,0 +1,39 @@
+# 이미지 저장소/빌드 파이프라인(ECR, CI)은 아직 이 저장소에 없다 — image는 부트스트랩 전 실제 값으로 교체해야 하는 placeholder.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rca-agent
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rca-agent
+  template:
+    metadata:
+      labels:
+        app: rca-agent
+    spec:
+      serviceAccountName: rca-agent-irsa
+      containers:
+        - name: rca-agent
+          image: "594532711953.dkr.ecr.ap-northeast-2.amazonaws.com/dpgy-infra-rca-agent:latest"
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: rca-agent-config
+          env:
+            - name: DISCORD_WEBHOOK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: discord-webhook
+                  key: url
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080

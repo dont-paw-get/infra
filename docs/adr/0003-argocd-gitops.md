@@ -46,6 +46,7 @@
 6. **Grafana Alerting의 시크릿 참조 방식 변경.** 기존에는 `scripts/install.sh`가 셸 `envsubst`로 `${DISCORD_WEBHOOK_URL}`을 치환했다. GitOps 환경에서는 이 수동 스크립트 실행이 사라지므로, Grafana의 자체 provisioning 파일 환경변수 확장 문법(`$__env{VARNAME}`)을 사용한다. `discord-webhook` Secret의 `url` 키를 kube-prometheus-stack 차트의 `grafana.envValueFrom`으로 Grafana 파드 환경변수(`DISCORD_WEBHOOK_URL`)에 주입하고, provisioning YAML은 `$__env{DISCORD_WEBHOOK_URL}`을 참조한다.
 7. **`scripts/install.sh`는 최초 부트스트랩 전용으로 대폭 축소.** `monitoring` 네임스페이스 생성과 `monitoring/argocd/*.yaml` 최초 1회 `kubectl apply`만 남긴다. Helm 설치, Secret 생성, envsubst 로직은 모두 제거한다(ArgoCD + ESO가 대체).
 8. **`backend-auth` 컨벤션을 그대로 따른다.** 모든 `Application`은 `targetRevision: develop`(이 저장소는 dev/prod로 나뉘지 않는 단일 클러스터 공유 인프라이므로, `backend-auth`의 실사용 환경과 동일하게 `develop`을 추적한다)과 `metadata.finalizers: [resources-finalizer.argocd.argoproj.io]`(Application 삭제 시 하위 리소스 cascade 정리)를 둔다. 릴리스 승격이 필요해지면(예: `main` 별도 추적) 이 항목을 갱신한다.
+9. **서비스 저장소(`backend-book` 등)는 이 저장소의 ArgoCD Application으로 관리하지 않는다.** 이 저장소는 관측 스택(공유 인프라)만 소유하며, 서비스 저장소의 GitOps 전환은 각 서비스 저장소가 독립적으로 결정·소유한다.
 
 ## 결과
 
@@ -59,4 +60,3 @@
 
 - ArgoCD Application의 Helm `targetRevision`(차트 버전)을 실제 값으로 고정 — 최초 부트스트랩 시 `helm search repo <chart>`로 최신 안정 버전을 확인해 채워야 한다(현재 매니페스트에는 플레이스홀더).
 - IAM Role ARN(IRSA) — 실제 AWS 계정 ID/Role 이름으로 교체 필요(현재 플레이스홀더). ADR-0002(RCA Agent)의 IRSA 설정과 함께 한 번에 정리하는 것을 권장.
-- 서비스 저장소(`backend-book` 등)까지 이 저장소의 ArgoCD Application으로 관리할지, 별도로 둘지 — 서비스 저장소 GitOps 전환 착수 시점에 결정.

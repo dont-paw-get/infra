@@ -2,6 +2,11 @@
 # 배포 시 grafana sidecar(provisioning) 또는 grafana ConfigMap으로 마운트한다.
 # 실제 웹훅 URL은 여기 두지 않는다 — secrets/README.md 참고 (ExternalSecret → grafana 파드 env var 주입).
 # $__env{}는 Grafana 자체의 provisioning 파일 환경변수 확장 문법이다 (셸 envsubst가 아님).
+#
+# 같은 contact point에 RCA Agent용 webhook receiver를 추가한다 (docs/adr/0002-anomaly-rca-agent.md 결정 #3).
+# 알림 발화 시 discord-webhook receiver(원본 알림)와 rca-agent-webhook receiver(RCA 트리거)가 동시에 실행되며,
+# 두 경로가 독립적이므로 Agent 장애가 원본 Discord 알림에 영향을 주지 않는다.
+# rca-agent Service는 monitoring/rca-agent/k8s/service.yaml, 클러스터 내부 통신이라 별도 인증 없음.
 apiVersion: 1
 
 contactPoints:
@@ -14,3 +19,9 @@ contactPoints:
           url: "$__env{DISCORD_WEBHOOK_URL}"
           use_discord_username: false
         disableResolveMessage: false
+      - uid: rca-agent-webhook-receiver
+        type: webhook
+        settings:
+          url: "http://rca-agent.monitoring.svc.cluster.local:8080/webhook"
+          httpMethod: POST
+        disableResolveMessage: true

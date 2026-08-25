@@ -38,13 +38,13 @@
 
 ## 결과
 
-- `monitoring/` 하위에 Agent용 디렉터리(소스, Dockerfile, K8s manifest/Helm values)가 추가된다.
-- Grafana Alerting의 webhook 통합 설정과 IRSA(ServiceAccount/IAM Role) 설정이 추가로 필요하다.
+- `monitoring/rca-agent/`에 Agent 소스(FastAPI webhook 서버 + Strands SDK Agent + Discord 알림), Dockerfile, K8s manifest(Kustomize)가 추가되었다. `monitoring/argocd/rca-agent.yaml`로 배포된다.
+- Grafana Alerting의 webhook 통합은 기존 `discord-webhook` contact point에 `rca-agent-webhook-receiver`를 추가하는 방식으로 구성했다(`monitoring/alerting/contact-points/discord.yaml`).
+- IRSA `ServiceAccount`(`rca-agent-irsa`)는 추가했으나 IAM Role 자체 생성은 저장소 범위 밖(`.harness/PLAN.md`).
 - Agent는 클러스터 쓰기 권한이 없으므로, 자동 조치가 필요한 경우는 이번 범위에서 제외되며 향후 별도 ADR로 재검토한다.
 
 ## 미결정 (추후 논의 필요)
 
-- Grafana Alerting → Agent webhook 통합의 정확한 구성 방식(기존 `discord-webhook` contact point 확장 vs 별도 contact point + 라우팅) — 구현 중 확정
 - IRSA용 IAM Role의 정확한 Bedrock 권한 범위(모델 access 범위, 리전 등)
 - Agent 장애/타임아웃 시 재시도·알림 정책 (RCA 실패를 어떻게 가시화할지)
 - 향후 제한된 자동 조치 권한 부여 여부 — 이번 ADR은 명시적으로 배제, 필요해지면 별도 ADR

@@ -17,7 +17,7 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 | `loki` | `grafana/loki` | grafana | `monitoring/loki/values.yaml` | `monitoring/argocd/loki.yaml` |
 | `alloy` | `grafana/alloy` | grafana | `monitoring/alloy/values.yaml` | `monitoring/argocd/alloy.yaml` |
 
-3종 모두 `monitoring` 네임스페이스(`monitoring/namespace.yaml`)에 설치한다(`external-secrets`만 자체 네임스페이스). Helm 차트는 ArgoCD 멀티소스(`sources`)로 업스트림 repo에서, values는 이 저장소 git 경로에서 가져온다. 차트 `targetRevision`은 현재 플레이스홀더(`<CHART_VERSION>`) — 최초 부트스트랩 시 고정 필요(`docs/adr/0003-argocd-gitops.md` 미결정).
+3종 모두 `monitoring` 네임스페이스(`monitoring/namespace.yaml`)에 설치한다(`external-secrets`만 자체 네임스페이스). Helm 차트는 ArgoCD 멀티소스(`sources`)로 업스트림 repo에서, values는 이 저장소 git 경로에서 가져온다. 차트 `targetRevision`은 실제 버전으로 고정됨(external-secrets 2.9.0, kube-prometheus-stack 88.5.4, loki 7.3.0, alloy 1.11.1 — 2026-08-24 기준, artifacthub.io).
 
 `monitoring/alerting/`(`monitoring/argocd/alerting.yaml`)는 `kustomization.yaml`의 `configMapGenerator`로 Grafana Alerting provisioning ConfigMap을 생성한다. `monitoring/external-secrets/`(`monitoring/argocd/external-secrets-config.yaml`)는 이미 유효한 K8s 매니페스트(ServiceAccount/ClusterSecretStore/ExternalSecret)라 Kustomize 없이 순수 YAML 디렉터리로 둔다.
 
@@ -44,6 +44,7 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 ## 알림 (Grafana Alerting)
 
 - Contact point: `discord-webhook` (`monitoring/alerting/contact-points/discord.yaml`), 값은 `$__env{DISCORD_WEBHOOK_URL}`(Grafana 자체 provisioning 환경변수 확장 문법)로 참조. 이 env var는 `grafana.envValueFrom`(values.yaml)이 `discord-webhook` Secret에서 주입.
+- 같은 contact point에 `rca-agent-webhook-receiver`(webhook, `disableResolveMessage: true`)가 추가되어 있다 — 알림 발화 시 원본 Discord 알림과 별개로 RCA Agent(`http://rca-agent.monitoring.svc.cluster.local:8080/webhook`)를 트리거한다. 두 receiver는 독립 경로라 Agent 장애가 원본 알림에 영향을 주지 않는다.
 - Notification policy: 전체 알림을 `discord-webhook`으로 라우팅 (`monitoring/alerting/policies/notification-policy.yaml`).
 - Rules 5종 (`monitoring/alerting/rules/`): HTTP 5xx 에러율, p99 레이턴시, CrashLoopBackOff/OOMKilled, PVC 사용률, 로그 ERROR 급증. threshold는 모두 임시값.
 - provisioning 배포 메커니즘: `monitoring/alerting/kustomization.yaml`(`configMapGenerator`)이 각 YAML을 `grafana_alert=1` 라벨의 ConfigMap으로 만들고, ArgoCD(`monitoring/argocd/alerting.yaml`)가 이를 동기화 → Grafana sidecar가 읽어감.
@@ -52,6 +53,16 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 
 - External Secrets Operator + AWS Secrets Manager, 인증은 IRSA. `grafana-admin-credentials`, `discord-webhook` K8s Secret을 `ExternalSecret` CR이 자동 생성/갱신.
 - 상세 정책·매니페스트 경로는 `secrets/README.md` 참고. 과거 `.env` + `scripts/install.sh` 수동 방식은 폐지됨(`docs/adr/0003-argocd-gitops.md`).
+
+## RCA Agent (`monitoring/rca-agent/`)
+
+Grafana Alerting 발화(webhook)를 받아 Bedrock 기반으로 원인을 분석하고 Discord에 후속 메시지를 보고하는 read-only Agent. 결정 배경은 `docs/adr/0002-anomaly-rca-agent.md` 참고.
+
+- `src/`: FastAPI 서버(`main.py`, `/webhook`)가 Grafana 알림을 받아 `analyzer.py`(Strands SDK `Agent` + Bedrock + Prometheus/Loki 쿼리 tool)를 호출하고, 결과를 `notifier.py`가 Discord webhook으로 전송. 프롬프트/쿼리 전략은 최소 동작 스켈레톤 수준(`.harness/PLAN.md`에 다듬기 항목 있음).
+- 배포: `monitoring/rca-agent/k8s/`(Kustomize) — IRSA `ServiceAccount`(`rca-agent-irsa`), `ConfigMap`(Bedrock 리전/모델, Prometheus/Loki 엔드포인트), `Deployment`(image는 ECR placeholder), `Service`(`rca-agent:8080`). `monitoring/argocd/rca-agent.yaml`(sync-wave 0)로 동기화.
+- Prometheus/Loki는 Alloy와 동일하게 클러스터 내부 서비스 DNS(`prometheus-operated`, `loki-gateway`)로 별도 인증 없이 접근.
+- Bedrock 인증은 IRSA(`arn:aws:iam::594532711953:role/dpgy-infra-rca-agent`, role은 아직 미생성 — `.harness/PLAN.md`).
+- 클러스터 쓰기 권한 없음 (read-only 분석/보고 전용).
 
 ## 서비스 저장소와의 경계
 

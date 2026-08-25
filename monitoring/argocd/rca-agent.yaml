@@ -1,0 +1,24 @@
+# RCA Agent(ServiceAccount/ConfigMap/Deployment/Service) 배포.
+# discord-webhook Secret(wave -1)을 환경변수로 참조하므로 wave 0으로 둔다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rca-agent
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/dont-paw-get/infra.git
+    targetRevision: develop
+    path: monitoring/rca-agent/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
