@@ -61,7 +61,7 @@ Grafana Alerting 발화(webhook)를 받아 Bedrock 기반으로 원인을 분석
 - `src/`: FastAPI 서버(`main.py`, `/webhook`)가 Grafana 알림을 받아 `analyzer.py`(Strands SDK `Agent` + Bedrock + Prometheus/Loki 쿼리 tool)를 호출하고, 결과를 `notifier.py`가 Discord webhook으로 전송. 프롬프트/쿼리 전략은 최소 동작 스켈레톤 수준(`.harness/PLAN.md`에 다듬기 항목 있음).
 - 배포: `monitoring/rca-agent/k8s/`(Kustomize) — IRSA `ServiceAccount`(`rca-agent-irsa`), `ConfigMap`(Bedrock 리전/모델, Prometheus/Loki 엔드포인트), `Deployment`(image는 ECR placeholder), `Service`(`rca-agent:8080`). `monitoring/argocd/rca-agent.yaml`(sync-wave 0)로 동기화.
 - Prometheus/Loki는 Alloy와 동일하게 클러스터 내부 서비스 DNS(`prometheus-operated`, `loki-gateway`)로 별도 인증 없이 접근.
-- Bedrock 인증은 IRSA(`arn:aws:iam::594532711953:role/dpgy-infra-rca-agent`, role은 아직 미생성 — `.harness/PLAN.md`).
+- Bedrock 인증은 IRSA(`arn:aws:iam::594532711953:role/dpgy-infra-rca-agent`, 생성 완료 — 권한은 `foundation-model/anthropic.claude-sonnet-5`로 스코프). 모델은 `anthropic.claude-sonnet-5`로 확정.
 - 클러스터 쓰기 권한 없음 (read-only 분석/보고 전용).
 
 ## 서비스 저장소와의 경계

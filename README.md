@@ -44,5 +44,5 @@ scripts/install.sh              최초 부트스트랩 스크립트 (네임스�
 ## 미해결 이슈
 
 체크리스트는 `.harness/PLAN.md` 참고 — 데이터 보존 기간, Grafana 외부 노출/인증, 알림 threshold 튜닝,
-IRSA IAM Role 실제 생성(External Secrets/RCA Agent), RCA Agent 이미지 빌드 파이프라인. 결정 배경/근거는
+RCA Agent 이미지 빌드 파이프라인. 결정 배경/근거는
 `docs/adr/0001-observability-stack.md`, `docs/adr/0002-anomaly-rca-agent.md`, `docs/adr/0003-argocd-gitops.md`.

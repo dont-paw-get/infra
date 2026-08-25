@@ -40,11 +40,11 @@
 
 - `monitoring/rca-agent/`에 Agent 소스(FastAPI webhook 서버 + Strands SDK Agent + Discord 알림), Dockerfile, K8s manifest(Kustomize)가 추가되었다. `monitoring/argocd/rca-agent.yaml`로 배포된다.
 - Grafana Alerting의 webhook 통합은 기존 `discord-webhook` contact point에 `rca-agent-webhook-receiver`를 추가하는 방식으로 구성했다(`monitoring/alerting/contact-points/discord.yaml`).
-- IRSA `ServiceAccount`(`rca-agent-irsa`)는 추가했으나 IAM Role 자체 생성은 저장소 범위 밖(`.harness/PLAN.md`).
+- IRSA `ServiceAccount`(`rca-agent-irsa`) + IAM Role(`dpgy-infra-rca-agent`) 생성 완료(2026-08-25, AWS Console). 신뢰 정책은 `sub: system:serviceaccount:monitoring:rca-agent-irsa`로 좁혔고, 권한은 `bedrock:InvokeModel(WithResponseStream)`을 `foundation-model/anthropic.claude-sonnet-5`로 스코프했다.
+- Bedrock 모델은 **anthropic.claude-sonnet-5**로 확정(`monitoring/rca-agent/k8s/configmap.yaml`의 `BEDROCK_MODEL_ID`). Bedrock 콘솔의 모델 액세스(Model access) 승인은 별도 확인 필요.
 - Agent는 클러스터 쓰기 권한이 없으므로, 자동 조치가 필요한 경우는 이번 범위에서 제외되며 향후 별도 ADR로 재검토한다.
 
 ## 미결정 (추후 논의 필요)
 
-- IRSA용 IAM Role의 정확한 Bedrock 권한 범위(모델 access 범위, 리전 등)
 - Agent 장애/타임아웃 시 재시도·알림 정책 (RCA 실패를 어떻게 가시화할지)
 - 향후 제한된 자동 조치 권한 부여 여부 — 이번 ADR은 명시적으로 배제, 필요해지면 별도 ADR

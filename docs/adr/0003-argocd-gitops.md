@@ -58,5 +58,4 @@
 
 ## 미결정 (추후 논의 필요)
 
-- ArgoCD Application의 Helm `targetRevision`(차트 버전)을 실제 값으로 고정 — 최초 부트스트랩 시 `helm search repo <chart>`로 최신 안정 버전을 확인해 채워야 한다(현재 매니페스트에는 플레이스홀더).
-- IAM Role ARN(IRSA) — 실제 AWS 계정 ID/Role 이름으로 교체 필요(현재 플레이스홀더). ADR-0002(RCA Agent)의 IRSA 설정과 함께 한 번에 정리하는 것을 권장.
+(현재 없음 — Helm `targetRevision` 고정, IAM Role(IRSA) 생성 모두 완료. `.harness/STATE.md` 참고)

@@ -19,12 +19,17 @@
   - Helm 차트 버전 고정 완료(artifacthub.io 기준 2026-08-24): external-secrets 2.9.0, kube-prometheus-stack 88.5.4, loki 7.3.0, alloy 1.11.1
   - IRSA role-arn 계정 ID 확정(594532711953, 사용자 확인) — `monitoring/external-secrets/service-account.yaml`
   - 로컬에 Helm CLI 설치 후 4개 차트 모두 `helm template` 렌더링 검증 완료. `monitoring/loki/values.yaml`에서 발견한 버그(SimpleScalable 타겟 read/write/backend의 기본 replicas=3과 SingleBinary 모드 충돌) 수정 — `read.replicas`/`write.replicas`/`backend.replicas`를 0으로 명시
-  - 부트스트랩 전 남은 값(IAM Role 실제 생성, AWS Secrets Manager 실값)은 `.harness/PLAN.md` 참고
   - 서비스 저장소(`backend-book` 등)는 이 저장소의 ArgoCD Application으로 관리하지 않고 별도로 둔다 — 결정 완료, `docs/adr/0003-argocd-gitops.md` 갱신
 - [x] RCA Agent 배포 스캐폴딩 추가 — `docs/adr/0002-anomaly-rca-agent.md`
   - `monitoring/rca-agent/src/`: FastAPI webhook 서버(`main.py`) + Strands SDK Agent(`analyzer.py`, Bedrock + Prometheus/Loki 쿼리 tool) + Discord 알림 전송(`notifier.py`). 프롬프트/쿼리 전략은 최소 동작 스켈레톤 수준
   - `monitoring/rca-agent/Dockerfile`, `requirements.txt`
-  - `monitoring/rca-agent/k8s/`: IRSA `ServiceAccount`(role `dpgy-infra-rca-agent`, 계정 594532711953 placeholder), `ConfigMap`(Bedrock 리전/모델, Prometheus/Loki 엔드포인트), `Deployment`(image는 ECR placeholder, `discord-webhook` Secret 재사용), `Service`, `kustomization.yaml` — `kubectl kustomize`로 렌더링 검증 완료
+  - `monitoring/rca-agent/k8s/`: IRSA `ServiceAccount`, `ConfigMap`(Bedrock 리전/모델, Prometheus/Loki 엔드포인트), `Deployment`(image는 ECR placeholder, `discord-webhook` Secret 재사용), `Service`, `kustomization.yaml` — `kubectl kustomize`로 렌더링 검증 완료
   - `monitoring/argocd/rca-agent.yaml`: 신규 Application CR (sync-wave 0, `discord-webhook` Secret에 의존)
   - `monitoring/alerting/contact-points/discord.yaml`: 기존 `discord-webhook` contact point에 `rca-agent-webhook-receiver`(webhook, `disableResolveMessage: true`) 추가 — 원본 Discord 알림과 독립 경로 유지 (ADR-0002 결정 #3). `kubectl kustomize`로 렌더링 검증 완료
-  - 남은 작업(프롬프트 다듬기, IAM Role 생성, 이미지 빌드 파이프라인)은 `.harness/PLAN.md` 참고
+  - 남은 작업(프롬프트 다듬기, 모델 액세스 승인 확인, 이미지 빌드 파이프라인)은 `.harness/PLAN.md` 참고
+- [x] ArgoCD 부트스트랩 전제조건 전부 완료 (2026-08-25, 사용자가 AWS Console에서 직접 수행)
+  - AWS Secrets Manager 시크릿 값 2종 생성: `dpgy-infra/grafana-admin-credentials`(JSON), `dpgy-infra/discord-webhook`(plaintext), 리전 ap-northeast-2
+  - EKS 클러스터 OIDC 프로바이더(`oidc.eks.ap-northeast-2.amazonaws.com/id/846614EE11D279BFFEA8FA0CE739E848`)를 IAM ID 공급자로 등록
+  - IAM Role `dpgy-infra-external-secrets` 생성 — 신뢰 정책 `sub: system:serviceaccount:monitoring:external-secrets-irsa`, 권한 `secretsmanager:GetSecretValue`/`DescribeSecret`을 `dpgy-infra/*`로 스코프
+  - IAM Role `dpgy-infra-rca-agent` 생성 — 신뢰 정책 `sub: system:serviceaccount:monitoring:rca-agent-irsa`, 권한 `bedrock:InvokeModel(WithResponseStream)`을 `foundation-model/anthropic.claude-sonnet-5`로 스코프. Bedrock 모델은 `anthropic.claude-sonnet-5`로 확정(`monitoring/rca-agent/k8s/configmap.yaml`)
+  - 남은 건 이미지 빌드 파이프라인(ECR/CI)뿐 — `.harness/PLAN.md` 참고. 그 외에는 `kubectl apply -f monitoring/argocd/` 부트스트랩을 실제로 실행할 수 있는 상태
