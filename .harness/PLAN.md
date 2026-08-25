@@ -17,8 +17,8 @@
 ## 알림 규칙 튜닝
 
 - [ ] 트래픽 규모 파악 후 threshold 재조정 (현재 러프한 초기값):
-  - `monitoring/alerting/rules/http-error-rate.yaml` — 5xx 에러율 5%
-  - `monitoring/alerting/rules/latency.yaml` — p99 레이턴시 1초
+  - `monitoring/alerting/rules/http-error-rate.yaml` — 5xx 에러율 5% (현재 배포 제외 상태, 아래 "서비스 저장소 연동" 참고)
+  - `monitoring/alerting/rules/latency.yaml` — p99 레이턴시 1초 (현재 배포 제외 상태, 아래 "서비스 저장소 연동" 참고)
   - `monitoring/alerting/rules/pvc-usage.yaml` — PVC 사용률 85%
   - `monitoring/alerting/rules/log-error-spike.yaml` — 분당 ERROR 로그 5건
 - [ ] 알림이 늘어나면 `monitoring/alerting/policies/notification-policy.yaml`의 단일 라우팅을 서비스/심각도별로 세분화
@@ -37,3 +37,4 @@ Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받
 
 - [ ] `ServiceMonitor`/`PodMonitor` CR을 실제로 각 서비스 저장소(`backend-book` 등)에 추가하도록 해당 팀에 전달 (이 저장소 범위 밖 — ADR-0001 참고)
 - [ ] Book Service 등 서비스 쪽 계측(Micrometer `/actuator/prometheus` 노출, 구조화 로깅) 준비 여부 확인
+- [ ] 위 계측이 붙으면 `http-error-rate`/`latency` 알림(현재 `monitoring/alerting/kustomization.yaml`에서 배포 제외)을 다시 configMapGenerator에 추가

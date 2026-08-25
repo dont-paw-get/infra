@@ -18,12 +18,9 @@ configMapGenerator:
   - name: grafana-alerting-notification-policy
     files:
       - policies/notification-policy.yaml
-  - name: grafana-alerting-http-error-rate
-    files:
-      - rules/http-error-rate.yaml
-  - name: grafana-alerting-latency
-    files:
-      - rules/latency.yaml
+  # grafana-alerting-http-error-rate / grafana-alerting-latency: 서비스 저장소 계측(Micrometer
+  # /actuator/prometheus + ServiceMonitor) 전까지 배포 대상에서 제외 — 대상 메트릭이 없어 NoData 알림만 발생.
+  # 계측 완료 후 재추가 (.harness/PLAN.md "서비스 저장소 연동" 참고). 규칙 파일 자체는 rules/에 남겨둠.
   - name: grafana-alerting-log-error-spike
     files:
       - rules/log-error-spike.yaml

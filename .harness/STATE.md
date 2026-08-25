@@ -33,3 +33,6 @@
   - IAM Role `dpgy-infra-external-secrets` 생성 — 신뢰 정책 `sub: system:serviceaccount:monitoring:external-secrets-irsa`, 권한 `secretsmanager:GetSecretValue`/`DescribeSecret`을 `dpgy-infra/*`로 스코프
   - IAM Role `dpgy-infra-rca-agent` 생성 — 신뢰 정책 `sub: system:serviceaccount:monitoring:rca-agent-irsa`, 권한 `bedrock:InvokeModel(WithResponseStream)`을 `foundation-model/anthropic.claude-sonnet-5`로 스코프. Bedrock 모델은 `anthropic.claude-sonnet-5`로 확정(`monitoring/rca-agent/k8s/configmap.yaml`)
   - 남은 건 이미지 빌드 파이프라인(ECR/CI)뿐 — `.harness/PLAN.md` 참고. 그 외에는 `kubectl apply -f monitoring/argocd/` 부트스트랩을 실제로 실행할 수 있는 상태
+- [x] 알림 규칙 배포 범위를 인프라 레벨로 한정 (2026-08-25, 사용자 확인) — 서비스 저장소 계측(Micrometer `/actuator/prometheus` + `ServiceMonitor`) 전까지 app-level 알림은 `NoData`만 발생시키므로 배포 제외
+  - `monitoring/alerting/kustomization.yaml`에서 `grafana-alerting-http-error-rate`/`grafana-alerting-latency` configMapGenerator 항목 제거 (규칙 파일은 `monitoring/alerting/rules/`에 남겨둠, 서비스 계측 완료 후 재추가)
+  - `kubectl kustomize monitoring/alerting/` 렌더링 재검증 완료 — ConfigMap 5개(discord, notification-policy, log-error-spike, pod-health, pvc-usage)만 생성됨

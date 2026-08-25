@@ -46,7 +46,8 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 - Contact point: `discord-webhook` (`monitoring/alerting/contact-points/discord.yaml`), 값은 `$__env{DISCORD_WEBHOOK_URL}`(Grafana 자체 provisioning 환경변수 확장 문법)로 참조. 이 env var는 `grafana.envValueFrom`(values.yaml)이 `discord-webhook` Secret에서 주입.
 - 같은 contact point에 `rca-agent-webhook-receiver`(webhook, `disableResolveMessage: true`)가 추가되어 있다 — 알림 발화 시 원본 Discord 알림과 별개로 RCA Agent(`http://rca-agent.monitoring.svc.cluster.local:8080/webhook`)를 트리거한다. 두 receiver는 독립 경로라 Agent 장애가 원본 알림에 영향을 주지 않는다.
 - Notification policy: 전체 알림을 `discord-webhook`으로 라우팅 (`monitoring/alerting/policies/notification-policy.yaml`).
-- Rules 5종 (`monitoring/alerting/rules/`): HTTP 5xx 에러율, p99 레이턴시, CrashLoopBackOff/OOMKilled, PVC 사용률, 로그 ERROR 급증. threshold는 모두 임시값.
+- Rules 5종 파일 존재(`monitoring/alerting/rules/`): HTTP 5xx 에러율, p99 레이턴시, CrashLoopBackOff/OOMKilled, PVC 사용률, 로그 ERROR 급증. threshold는 모두 임시값.
+- 이 중 **HTTP 5xx 에러율/p99 레이턴시(app-level, Micrometer 메트릭 의존)는 서비스 저장소 계측 전까지 배포 제외** — `monitoring/alerting/kustomization.yaml`의 `configMapGenerator`에서 뺐다(파일은 남아있음). 나머지 3종(파드 생존/자원, 로그)만 실제 배포됨. 계측 완료 후 재추가 조건은 `.harness/PLAN.md`의 "서비스 저장소 연동" 참고.
 - provisioning 배포 메커니즘: `monitoring/alerting/kustomization.yaml`(`configMapGenerator`)이 각 YAML을 `grafana_alert=1` 라벨의 ConfigMap으로 만들고, ArgoCD(`monitoring/argocd/alerting.yaml`)가 이를 동기화 → Grafana sidecar가 읽어감.
 
 ## 시크릿
