@@ -36,3 +36,8 @@
 - [x] 알림 규칙 배포 범위를 인프라 레벨로 한정 (2026-08-25, 사용자 확인) — 서비스 저장소 계측(Micrometer `/actuator/prometheus` + `ServiceMonitor`) 전까지 app-level 알림은 `NoData`만 발생시키므로 배포 제외
   - `monitoring/alerting/kustomization.yaml`에서 `grafana-alerting-http-error-rate`/`grafana-alerting-latency` configMapGenerator 항목 제거 (규칙 파일은 `monitoring/alerting/rules/`에 남겨둠, 서비스 계측 완료 후 재추가)
   - `kubectl kustomize monitoring/alerting/` 렌더링 재검증 완료 — ConfigMap 5개(discord, notification-policy, log-error-spike, pod-health, pvc-usage)만 생성됨
+- [x] 스토리지/보존 기간 확정 (2026-08-25, 사용자 확인) — ADR-0001 미결정 항목 해소
+  - Prometheus: 15d 보존 / PVC 20Gi 그대로 확정 (`monitoring/kube-prometheus-stack/values.yaml`)
+  - Loki: 로컬 filesystem → **S3(`dpgy-infra-loki-logs`, `ap-northeast-2`) 전환**, 보존 14d 유지, IRSA 인증(`dpgy-infra-loki` Role) — `docs/adr/0004-loki-s3-storage.md` 신규 작성. `compactor.retention_enabled: true` 추가(기존 filesystem 구성에도 없던 문제 — retention_period가 있어도 compactor 없이는 삭제가 안 됨)
+  - `monitoring/loki/values.yaml`: python `yaml.safe_load` 문법 검증 완료. Helm CLI가 이 세션에 없어 `helm template` 재검증은 미실행 — 다음 세션/사용자가 확인 필요
+  - S3 버킷 `dpgy-infra-loki-logs` 생성 완료, IAM Role `dpgy-infra-loki` 생성 완료 (2026-08-25, AWS Console, 사용자 확인) — 신뢰 정책 `sub: system:serviceaccount:monitoring:loki`, 권한 `s3:GetObject`/`PutObject`/`DeleteObject`/`ListBucket`을 `dpgy-infra-loki-logs`로 스코프. Loki S3 전환 전제조건 전부 완료

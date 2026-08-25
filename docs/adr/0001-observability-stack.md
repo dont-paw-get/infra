@@ -37,7 +37,7 @@ Organization은 여러 서비스로 구성된 MSA(Book Service, Python RAG Servi
 
 ## 미결정 (추후 논의 필요)
 
-- Prometheus/Loki 데이터 보존 기간과 PVC 스토리지 용량
+- ~~Prometheus/Loki 데이터 보존 기간과 PVC 스토리지 용량~~ → 해소 (Prometheus 15d/20Gi 유지, Loki는 S3 전환 후 14d — `docs/adr/0004-loki-s3-storage.md`)
 - Grafana 외부 노출 방식(Ingress)과 인증 방식
 - ~~시크릿 관리 방식 최종 확정~~ → `docs/adr/0003-argocd-gitops.md`에서 해소 (External Secrets Operator + AWS Secrets Manager)
 - 알림 규칙(threshold) 초기값 튜닝 — 트래픽 규모 파악 전이므로 러프한 기본값으로 시작

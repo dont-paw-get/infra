@@ -12,7 +12,7 @@ prometheus:
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
 
-    # TODO(open issue, ADR-0001): 보존 기간/스토리지 용량 확정 전까지의 임시값.
+    # 보존 기간/스토리지 용량 확정값 (2026-08-25, 사용자 확인 — ADR-0001 미결정 항목 해소).
     retention: 15d
     storageSpec:
       volumeClaimTemplate:

@@ -9,23 +9,40 @@ loki:
   commonConfig:
     replication_factor: 1
 
-  # TODO(open issue, ADR-0001): 오브젝트 스토리지(S3 등) 연동 여부 확정 전까지 로컬 파일시스템 사용.
+  # 오브젝트 스토리지 S3 연동 확정 (2026-08-25, 사용자 확인 — ADR-0001 미결정 항목 해소, 배경은 docs/adr/0004-loki-s3-storage.md).
+  # 인증은 IRSA(아래 serviceAccount.annotations) — 정적 액세스 키를 쓰지 않는다.
   storage:
-    type: filesystem
+    type: s3
+    bucketNames:
+      chunks: dpgy-infra-loki-logs
+      ruler: dpgy-infra-loki-logs
+      admin: dpgy-infra-loki-logs
+    s3:
+      region: ap-northeast-2
 
   schemaConfig:
     configs:
       - from: "2024-01-01"
         store: tsdb
-        object_store: filesystem
+        object_store: s3
         schema: v13
         index:
           prefix: loki_index_
           period: 24h
 
-  # TODO(open issue, ADR-0001): 로그 보존 기간 확정 전까지의 임시값.
+  # 로그 보존 기간 확정값 (2026-08-25, 사용자 확인 — ADR-0001 미결정 항목 해소).
+  # retention_period는 compactor.retention_enabled가 true여야 실제로 적용된다.
   limits_config:
     retention_period: 336h # 14d
+
+  compactor:
+    retention_enabled: true
+
+serviceAccount:
+  create: true
+  # IAM Role(dpgy-infra-loki) 생성 필요 — docs/adr/0004-loki-s3-storage.md, .harness/PLAN.md 참고.
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::594532711953:role/dpgy-infra-loki"
 
 singleBinary:
   replicas: 1
