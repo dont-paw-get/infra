@@ -28,7 +28,9 @@ Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받
 **남은 작업**
 - [ ] Bedrock 프롬프트/도구(PromQL·LogQL 조사 전략) 다듬기 — `monitoring/rca-agent/src/analyzer.py`는 최소 동작 스켈레톤 수준
 - [ ] Bedrock 콘솔에서 `anthropic.claude-sonnet-5` 모델 액세스(Model access) 승인 여부 확인
-- [ ] 이미지 빌드/푸시 파이프라인(ECR 저장소, CI) 구성 — 이 저장소에 아직 없음. `monitoring/rca-agent/k8s/deployment.yaml`의 image는 placeholder
+- [ ] ECR 저장소 `dpgy-infra-rca-agent` 생성 (AWS 콘솔/CLI, `ap-northeast-2`) — 아직 없음. `.github/workflows/rca-agent-build-push.yml`(CI)과 `monitoring/rca-agent/k8s/kustomization.yaml`(images.newTag)은 이미 구성됨
+- [ ] GitHub 저장소 Secrets에 `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` 등록 — ECR push 권한을 가진 IAM 사용자 필요 (CI 전용, 이 저장소 범위 밖)
+- [ ] (백로그) CI 인증을 정적 액세스 키 대신 GitHub OIDC(`role-to-assume`)로 전환 검토 — 이 저장소의 다른 컴포넌트는 전부 IRSA를 쓰는 것과 통일성
 - [ ] Agent 장애/타임아웃 시 재시도·알림 정책 (RCA 실패를 어떻게 가시화할지) — ADR-0002 미결정 항목
 
 ## 서비스 저장소 연동
