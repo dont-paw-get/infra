@@ -1,0 +1,86 @@
+# prometheus-community/kube-prometheus-stack
+# ADR-0001 결정 사항 반영: Alertmanager 대신 Grafana Alerting 사용, ServiceMonitor는 각 서비스 저장소가 소유.
+
+alertmanager:
+  # Grafana Alerting(Discord contact point)으로 알림을 처리하므로 Alertmanager는 비활성화한다.
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    # 서비스 저장소들이 자신의 네임스페이스에 두는 ServiceMonitor/PodMonitor를 모두 스크레이핑 대상으로 인식한다.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+    # 보존 기간/스토리지 용량 확정값 (2026-08-25, 사용자 확인 — ADR-0001 미결정 항목 해소).
+    retention: 15d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+kube-state-metrics:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+
+grafana:
+  grafana.ini:
+    unified_alerting:
+      enabled: true
+    alerting:
+      enabled: false # legacy alerting 비활성화 (unified alerting 사용)
+
+  # Loki를 두 번째 데이터소스로 등록한다. uid를 고정해 alerting 규칙(monitoring/alerting/rules)에서 참조한다.
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      access: proxy
+      url: http://loki-gateway.monitoring.svc.cluster.local
+      jsonData:
+        maxLines: 1000
+
+  # monitoring/alerting/ 하위 YAML을 ConfigMap(label: grafana_alert=1)으로 만들어두면
+  # 이 sidecar가 자동으로 읽어 /etc/grafana/provisioning/alerting/에 반영한다.
+  # (monitoring/alerting/kustomization.yaml이 ConfigMap을 생성한다 — docs/adr/0003-argocd-gitops.md)
+  sidecar:
+    alerts:
+      enabled: true
+      label: grafana_alert
+      labelValue: "1"
+      searchNamespace: monitoring
+
+  # monitoring/alerting/contact-points/discord.yaml의 $__env{DISCORD_WEBHOOK_URL} 참조용.
+  # discord-webhook Secret은 ExternalSecret이 생성한다 (monitoring/external-secrets/discord-webhook.yaml).
+  envValueFrom:
+    DISCORD_WEBHOOK_URL:
+      secretKeyRef:
+        name: discord-webhook
+        key: url
+
+  # 외부 노출 확정(2026-08-26, 사용자 확인 — ADR-0001 미결정 항목 해소): AWS Load Balancer Controller(ALB)로 노출.
+  # 도메인/ACM 인증서가 아직 없어 HTTP만 열어둔다 (ALB 기본 DNS 이름으로 접근). 인증은 Grafana 기본 admin 계정 로그인만 사용.
+  # 도메인+ACM 인증서 확보 후 HTTPS 전환 방법은 .harness/PLAN.md 참고.
+  ingress:
+    enabled: true
+    ingressClassName: alb
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    path: /
+    pathType: Prefix
+    hosts: []
+    tls: []
+
+  # admin 비밀번호는 ExternalSecret이 생성하는 grafana-admin-credentials Secret을 참조한다.
+  # (monitoring/external-secrets/grafana-admin-credentials.yaml, secrets/README.md 참고)
+  admin:
+    existingSecret: "grafana-admin-credentials"
+    userKey: admin-user
+    passwordKey: admin-password

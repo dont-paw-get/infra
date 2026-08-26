@@ -1,0 +1,66 @@
+# grafana/loki Helm chart
+# 단일 바이너리(SingleBinary) 모드로 시작한다. 트래픽/보존 요구가 커지면 SimpleScalable 모드로 전환 검토.
+
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+
+  commonConfig:
+    replication_factor: 1
+
+  # 오브젝트 스토리지 S3 연동 확정 (2026-08-25, 사용자 확인 — ADR-0001 미결정 항목 해소, 배경은 docs/adr/0004-loki-s3-storage.md).
+  # 인증은 IRSA(아래 serviceAccount.annotations) — 정적 액세스 키를 쓰지 않는다.
+  storage:
+    type: s3
+    bucketNames:
+      chunks: dpgy-infra-loki-logs
+      ruler: dpgy-infra-loki-logs
+      admin: dpgy-infra-loki-logs
+    s3:
+      region: ap-northeast-2
+
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: s3
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+  # 로그 보존 기간 확정값 (2026-08-25, 사용자 확인 — ADR-0001 미결정 항목 해소).
+  # retention_period는 compactor.retention_enabled가 true여야 실제로 적용된다.
+  limits_config:
+    retention_period: 336h # 14d
+
+  compactor:
+    retention_enabled: true
+
+serviceAccount:
+  create: true
+  # IAM Role(dpgy-infra-loki) 생성 필요 — docs/adr/0004-loki-s3-storage.md, .harness/PLAN.md 참고.
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::594532711953:role/dpgy-infra-loki"
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    size: 20Gi
+
+# SimpleScalable 타겟(read/write/backend)은 차트 기본값이 replicas: 3이라
+# deploymentMode: SingleBinary와 함께 두면 `helm template`이 검증 에러를 낸다 — 명시적으로 0으로 둔다.
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+gateway:
+  enabled: true
+
+test:
+  enabled: false

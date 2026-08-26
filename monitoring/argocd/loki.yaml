@@ -1,0 +1,32 @@
+# Helm 차트는 업스트림 repo에서, values는 이 저장소(monitoring/loki/values.yaml)에서 가져오는 멀티소스 구성.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: loki
+      # artifacthub.io 기준 2026-08-24 확인한 최신 안정 버전. 이후 갱신 시 `helm search repo grafana/loki`로 재확인.
+      targetRevision: "7.3.0"
+      helm:
+        valueFiles:
+          - $values/monitoring/loki/values.yaml
+    - repoURL: https://github.com/dont-paw-get/infra.git
+      targetRevision: develop
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - CreateNamespace=true

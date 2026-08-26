@@ -1,0 +1,12 @@
+# Bedrock 리전/모델 ID, Prometheus/Loki 내부 서비스 엔드포인트.
+# 클러스터 내부 통신이므로 별도 인증 없이 서비스 DNS로 접근한다 (docs/adr/0002-anomaly-rca-agent.md 결정 #8).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rca-agent-config
+  namespace: monitoring
+data:
+  BEDROCK_REGION: "ap-northeast-2"
+  BEDROCK_MODEL_ID: "anthropic.claude-sonnet-5"
+  PROMETHEUS_URL: "http://prometheus-operated.monitoring.svc.cluster.local:9090"
+  LOKI_URL: "http://loki-gateway.monitoring.svc.cluster.local"

@@ -1,0 +1,33 @@
+# Helm 차트는 업스트림 repo에서, values는 이 저장소(monitoring/kube-prometheus-stack/values.yaml)에서 가져오는 멀티소스 구성.
+# grafana-admin-credentials/discord-webhook Secret(ExternalSecret이 생성, wave -1)에 의존하므로 wave 0으로 둔다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      # artifacthub.io 기준 2026-08-24 확인한 최신 안정 버전. 이후 갱신 시 `helm search repo prometheus-community/kube-prometheus-stack`로 재확인.
+      targetRevision: "88.5.4"
+      helm:
+        valueFiles:
+          - $values/monitoring/kube-prometheus-stack/values.yaml
+    - repoURL: https://github.com/dont-paw-get/infra.git
+      targetRevision: develop
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - CreateNamespace=true

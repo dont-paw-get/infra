@@ -1,0 +1,65 @@
+name: RCA Agent - Build & Push to ECR
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "monitoring/rca-agent/**"
+  workflow_dispatch: {}
+
+# ECR 로그인에 IAM 유저 Access Key / Secret Key 사용
+permissions:
+  contents: write        # kustomization.yaml 이미지 태그 갱신 커밋을 위해
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REPOSITORY: dpgy-infra-rca-agent
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
+            -t "$REGISTRY/$ECR_REPOSITORY:latest" \
+            monitoring/rca-agent
+          docker push "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$REGISTRY/$ECR_REPOSITORY:latest"
+
+      # monitoring/rca-agent/k8s/kustomization.yaml의 images.newTag를 커밋 SHA로 갱신 → ArgoCD가 diff를 감지해 재배포한다.
+      # 커밋 메시지에 [skip ci]를 넣어 이 커밋 자체가 워크플로를 다시 트리거하는 무한루프를 막는다.
+      - name: Bump image tag (GitOps)
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          KFILE="monitoring/rca-agent/k8s/kustomization.yaml"
+          sed -i -E "s/^(\s*newTag:).*/\1 ${IMAGE_TAG}/" "$KFILE"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet "$KFILE"; then
+            echo "이미지 태그 변경 없음"
+          else
+            git add "$KFILE"
+            git commit -m "chore(rca-agent): [skip ci] 이미지 태그를 ${IMAGE_TAG}로 갱신"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi

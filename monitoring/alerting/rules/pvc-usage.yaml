@@ -1,0 +1,36 @@
+# Grafana Alerting provisioning: PVC 사용률 초과
+# TODO(open issue, ADR-0001): threshold(85%)는 러프한 초기값.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: pvc-usage
+    folder: Cluster Alerts
+    interval: 5m
+    rules:
+      - uid: pvc-usage-high
+        title: "PVC 사용률 초과"
+        condition: C
+        for: 10m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            model:
+              expr: |
+                kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes
+              instant: true
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.85]
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} PVC 사용률이 85%를 초과했습니다"
