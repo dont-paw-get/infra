@@ -63,9 +63,20 @@ grafana:
         name: discord-webhook
         key: url
 
-  # TODO(open issue, ADR-0001): 외부 노출 방식(Ingress)과 인증 방식 확정 전까지 비활성화.
+  # 외부 노출 확정(2026-08-26, 사용자 확인 — ADR-0001 미결정 항목 해소): AWS Load Balancer Controller(ALB)로 노출.
+  # 도메인/ACM 인증서가 아직 없어 HTTP만 열어둔다 (ALB 기본 DNS 이름으로 접근). 인증은 Grafana 기본 admin 계정 로그인만 사용.
+  # 도메인+ACM 인증서 확보 후 HTTPS 전환 방법은 .harness/PLAN.md 참고.
   ingress:
-    enabled: false
+    enabled: true
+    ingressClassName: alb
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    path: /
+    pathType: Prefix
+    hosts: []
+    tls: []
 
   # admin 비밀번호는 ExternalSecret이 생성하는 grafana-admin-credentials Secret을 참조한다.
   # (monitoring/external-secrets/grafana-admin-credentials.yaml, secrets/README.md 참고)

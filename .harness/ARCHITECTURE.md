@@ -39,7 +39,7 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 - Unified Alerting 활성화, legacy alerting 비활성화.
 - 기본 Prometheus 데이터소스(차트 기본 uid `prometheus`) + 추가 Loki 데이터소스(uid `loki`, `additionalDataSources`로 등록).
 - admin 계정은 `existingSecret: grafana-admin-credentials` 참조 (값은 ExternalSecret이 AWS Secrets Manager에서 동기화).
-- Ingress 비활성화 — 외부 노출 방식 미정 (`.harness/PLAN.md`).
+- ALB(AWS Load Balancer Controller) Ingress로 외부 노출 확정 — 도메인/ACM 인증서가 아직 없어 HTTP만 열려 있다(ALB 기본 DNS 이름으로 접근, `hosts: []`로 catch-all). 인증은 Grafana 기본 admin 계정 로그인만. 도메인+ACM 인증서 확보 후 HTTPS 전환은 `.harness/PLAN.md` 참고.
 - `sidecar.alerts` 활성화, `label: grafana_alert`, `labelValue: "1"`, `searchNamespace: monitoring` — 이 라벨의 ConfigMap을 자동으로 provisioning에 반영.
 
 ## 알림 (Grafana Alerting)

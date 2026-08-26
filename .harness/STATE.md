@@ -41,3 +41,7 @@
   - Loki: 로컬 filesystem → **S3(`dpgy-infra-loki-logs`, `ap-northeast-2`) 전환**, 보존 14d 유지, IRSA 인증(`dpgy-infra-loki` Role) — `docs/adr/0004-loki-s3-storage.md` 신규 작성. `compactor.retention_enabled: true` 추가(기존 filesystem 구성에도 없던 문제 — retention_period가 있어도 compactor 없이는 삭제가 안 됨)
   - `monitoring/loki/values.yaml`: python `yaml.safe_load` 문법 검증 완료. Helm CLI가 이 세션에 없어 `helm template` 재검증은 미실행 — 다음 세션/사용자가 확인 필요
   - S3 버킷 `dpgy-infra-loki-logs` 생성 완료, IAM Role `dpgy-infra-loki` 생성 완료 (2026-08-25, AWS Console, 사용자 확인) — 신뢰 정책 `sub: system:serviceaccount:monitoring:loki`, 권한 `s3:GetObject`/`PutObject`/`DeleteObject`/`ListBucket`을 `dpgy-infra-loki-logs`로 스코프. Loki S3 전환 전제조건 전부 완료
+- [x] Grafana 외부 노출/인증 확정 (2026-08-26, 사용자 확인) — ADR-0001 미결정 항목 해소
+  - ALB(AWS Load Balancer Controller) Ingress로 노출, 인증은 Grafana 기본 admin 계정 로그인만 (SSO 없음)
+  - 도메인/ACM 인증서가 아직 없어 우선 HTTP만 열어둠(`hosts: []`로 ALB 기본 DNS 이름에 catch-all) — `monitoring/kube-prometheus-stack/values.yaml`
+  - 도메인 확보 후 HTTPS 전환 절차는 `.harness/PLAN.md` 참고
