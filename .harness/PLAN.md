@@ -36,8 +36,8 @@ Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받
 
 2026-08-27 사용자 확인: `rca-agent`를 제외한 모든 Application이 `Synced`/`Healthy`. 자세한 진단 경위는 `.harness/STATE.md` 참고.
 
-- [ ] IAM 사용자 `gha-ecr-pusher`에 ECR push 권한(`ecr:BatchCheckLayerAvailability`/`InitiateLayerUpload`/`UploadLayerPart`/`CompleteLayerUpload`/`PutImage`/`BatchGetImage`, 리소스는 `dpgy-infra-rca-agent` 리포지토리로 스코프) 추가 후 CI 재실행(Actions 탭에서 Re-run failed jobs) → 이미지 push 성공 확인
-- [ ] 이미지 push 성공 후 `rca-agent` Application이 새 이미지를 pull해 `Synced`/`Healthy`로 전환되는지 확인 (현재 `ImagePullBackOff`)
+- [ ] `gha-ecr-pusher` IAM 권한 추가 후 이미지 push는 성공(2026-08-27) — `rca-agent` 파드가 재시도(`kubectl rollout restart deployment/rca-agent -n monitoring`)로 `Running`/`Healthy` 전환됐는지 최종 확인 필요
+- [ ] Loki/Prometheus PVC `storageClass: gp2` 수정 배포 후 `loki-0`/Prometheus 파드가 PVC 바인딩되어 `Running`으로 전환되는지 확인 (`kubectl get pvc -n monitoring`, `kubectl get pods -n monitoring`)
 
 ## 서비스 저장소 연동
 

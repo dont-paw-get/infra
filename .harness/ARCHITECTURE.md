@@ -29,11 +29,11 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 
 - Prometheus가 `serviceMonitorSelectorNilUsesHelmValues: false`로 설정되어 전 네임스페이스의 `ServiceMonitor`/`PodMonitor`를 스크레이핑 대상으로 인식한다.
 - Alertmanager는 비활성화(`alertmanager.enabled: false`) — 알림은 Grafana Alerting이 담당.
-- Prometheus 보존/스토리지 확정값: 15d / PVC 20Gi.
+- Prometheus 보존/스토리지 확정값: 15d / PVC 20Gi. `storageClassName: gp2` 명시 — 클러스터(EKS Auto Mode)에 default StorageClass가 없고 `gp2`(in-tree `kubernetes.io/aws-ebs` provisioner)만 존재해(2026-08-27 확인) 명시하지 않으면 PVC가 영원히 Pending으로 남는다.
 
 ## 로그
 
-- Loki는 SingleBinary 모드, 오브젝트 스토리지는 S3(`dpgy-infra-loki-logs`, `ap-northeast-2`, IRSA 인증), 보존 336h(14d) 확정 — 결정 배경은 `docs/adr/0004-loki-s3-storage.md` 참고. `compactor.retention_enabled: true`가 있어야 보존 기간이 실제로 적용된다. SimpleScalable 타겟(`read`/`write`/`backend`)은 차트 기본 replicas(3)와 SingleBinary 모드가 충돌하므로 명시적으로 0으로 둔다.
+- Loki는 SingleBinary 모드, `singleBinary.persistence.storageClass: gp2` 명시(위 Prometheus와 같은 이유), 오브젝트 스토리지는 S3(`dpgy-infra-loki-logs`, `ap-northeast-2`, IRSA 인증), 보존 336h(14d) 확정 — 결정 배경은 `docs/adr/0004-loki-s3-storage.md` 참고. `compactor.retention_enabled: true`가 있어야 보존 기간이 실제로 적용된다. SimpleScalable 타겟(`read`/`write`/`backend`)은 차트 기본 replicas(3)와 SingleBinary 모드가 충돌하므로 명시적으로 0으로 둔다.
 - Loki의 S3 접근은 IRSA(`arn:aws:iam::594532711953:role/dpgy-infra-loki`) — IAM Role 생성은 아직 안 됨, `.harness/PLAN.md` 참고.
 - Alloy가 DaemonSet으로 모든 노드에서 컨테이너 stdout을 수집해 `loki-gateway.monitoring.svc.cluster.local`로 전송한다.
 - 애플리케이션은 stdout에 JSON 구조화 로그(`level` 필드 포함)를 출력해야 `monitoring/alerting/rules/log-error-spike.yaml`의 LogQL이 동작한다.
