@@ -31,3 +31,6 @@ spec:
       prune: true
     syncOptions:
       - CreateNamespace=true
+      # prometheus-operator CRD(Prometheus/Alertmanager/PrometheusRule 등)도 external-secrets와
+      # 같은 이유(annotation 262144 bytes 한도)로 client-side apply가 실패할 수 있어 선제 적용.
+      - ServerSideApply=true
