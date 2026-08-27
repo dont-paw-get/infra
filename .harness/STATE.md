@@ -55,3 +55,9 @@
   - 경위: GitHub OIDC 전환(ADR-0005)의 전제("조직 레벨에 Secrets 없음 = 전례 없음")가 틀렸음을 사용자가 확인 — 이 조직은 Secrets를 저장소별로 등록하는 컨벤션이었고, `infra` 저장소만 아직 등록이 안 된 상태였음
   - `.github/workflows/rca-agent-build-push.yml`을 액세스 키 방식으로 원복: `configure-aws-credentials`가 다시 `secrets.AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` 사용, `permissions.id-token: write` 제거
   - `infra` 저장소에 `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` repo-level Secrets 등록 완료(2026-08-27, 사용자) — 남은 건 실제 CI 실행 확인뿐, `.harness/PLAN.md` 참고
+- [x] ArgoCD 동기화 실패(CRD annotation 262144 bytes 한도) 수정 (2026-08-27) — dev 클러스터에 `monitoring/argocd/` 최초 부트스트랩 중 `external-secrets`/`kube-prometheus-stack` Application이 "CustomResourceDefinition ... metadata.annotations: Too long" 에러로 동기화 실패하는 것을 사용자가 실제로 확인
+  - 원인: 두 차트가 설치하는 CRD(ClusterSecretStore/SecretStore, Prometheus/Alertmanager/PrometheusRule 등)가 client-side apply의 `last-applied-configuration` 어노테이션 한도를 초과
+  - 수정: `monitoring/argocd/external-secrets.yaml`, `monitoring/argocd/kube-prometheus-stack.yaml`의 `syncPolicy.syncOptions`에 `ServerSideApply=true` 추가 (YAML 문법 검증 완료, 실제 클러스터 재동기화 확인은 사용자 몫)
+- [x] ArgoCD 동기화 실패(discovery 캐시 지연) 수정 (2026-08-27) — `external-secrets-config`(wave -1)가 `external-secrets`(wave -2)의 CRD 설치 직후 동기화되면서 "failed to discover server resources for group version external-secrets.io/v1beta1: the server could not find the requested resource" 에러로 실패하는 것을 사용자가 실제로 확인
+  - 원인: CRD가 막 생성된 직후라 API 서버의 discovery 캐시가 아직 갱신되지 않음 (일시적 현상)
+  - 수정: `monitoring/argocd/external-secrets-config.yaml`에 `syncPolicy.retry`(limit 5, backoff 10s~3m) 추가해 discovery 캐시가 갱신될 때까지 자동 재시도하도록 함 (YAML 문법 검증 완료). 이미 멈춰있는 기존 실패는 `argocd app get external-secrets-config --hard-refresh`로 수동 킥 필요

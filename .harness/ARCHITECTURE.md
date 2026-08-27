@@ -8,6 +8,10 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 
 `sync-wave`로 동기화 순서를 보장한다: External Secrets Operator(-2) → ClusterSecretStore/ExternalSecret(-1) → kube-prometheus-stack/Loki/Alloy/alerting(0).
 
+`external-secrets`, `kube-prometheus-stack` Application은 `syncOptions: [ServerSideApply=true]`를 둔다 — 두 차트가 설치하는 CRD(ClusterSecretStore/SecretStore, Prometheus/Alertmanager/PrometheusRule 등)가 client-side apply의 `last-applied-configuration` 어노테이션 한도(262144 bytes)를 넘어 동기화가 실패하기 때문(2026-08-27 실제 발생 확인). Loki/Alloy는 자체 CRD가 없어 이 옵션이 필요 없다.
+
+`external-secrets-config`(wave -1)는 `syncPolicy.retry`(limit 5, backoff 10s~3m)를 둔다 — `external-secrets`(wave -2)가 CRD를 설치한 직후 API 서버의 discovery 캐시가 즉시 갱신되지 않아 `could not find the requested resource`로 실패하는 사례가 있어(2026-08-27 실제 발생 확인), 재시도로 discovery 캐시 갱신을 기다리게 한다. 이미 이 에러로 멈춰있다면 `argocd app get external-secrets-config --hard-refresh`(또는 UI의 Hard Refresh)로 즉시 재시도할 수 있다.
+
 ## 네임스페이스 / Helm 릴리스
 
 | 릴리스 이름 | 차트 | repo | values | ArgoCD Application |
