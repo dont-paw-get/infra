@@ -45,3 +45,13 @@
   - ALB(AWS Load Balancer Controller) Ingress로 노출, 인증은 Grafana 기본 admin 계정 로그인만 (SSO 없음)
   - 도메인/ACM 인증서가 아직 없어 우선 HTTP만 열어둠(`hosts: []`로 ALB 기본 DNS 이름에 catch-all) — `monitoring/kube-prometheus-stack/values.yaml`
   - 도메인 확보 후 HTTPS 전환 절차는 `.harness/PLAN.md` 참고
+- [x] RCA Agent 프롬프트/도구 다듬기 (2026-08-26) — `monitoring/rca-agent/src/analyzer.py`
+  - system prompt에 알림 5종(labels.alertname)별 라벨(namespace/pod, namespace/persistentvolumeclaim, app, application)과 조사 순서 명시 — Loki 라벨(Alloy가 붙이는 namespace/app/pod/container)과 Prometheus 알림 라벨(application)이 다름을 명시해 혼동 방지
+  - `query_prometheus_range` tool 추가 (now 기준 lookback_minutes 구간 range query) — 알림 발화 전후 추세(급증 vs 완만한 증가) 파악 가능해짐. 기존 `query_prometheus`는 instant query 전용으로 유지
+  - `query_prometheus`/`query_prometheus_range`/`query_loki` 모두 `try/except httpx.HTTPError`로 감싸 하나가 실패해도 `analyze()` 전체가 죽지 않고 실패 사실을 근거로 보고서 작성 가능. 응답은 8000자로 truncate해 토큰 낭비 방지
+  - k8s 이벤트/describe pod 조회는 RBAC 확장이 필요해 이번 범위에서 제외 — `.harness/PLAN.md` 백로그로 이동
+- [x] ECR 저장소 `dpgy-infra-rca-agent` 생성 완료 (2026-08-25, `ap-northeast-2`, 사용자) — `.github/workflows/rca-agent-build-push.yml`/`monitoring/rca-agent/k8s/kustomization.yaml`이 참조하는 URI(`594532711953.dkr.ecr.ap-northeast-2.amazonaws.com/dpgy-infra-rca-agent`)와 일치 확인
+- [x] CI → AWS 인증 방식 확정: 저장소별 액세스 키 (2026-08-27) — `docs/adr/0006-ci-access-key-revert.md` (`docs/adr/0005-github-actions-oidc.md`는 대체됨)
+  - 경위: GitHub OIDC 전환(ADR-0005)의 전제("조직 레벨에 Secrets 없음 = 전례 없음")가 틀렸음을 사용자가 확인 — 이 조직은 Secrets를 저장소별로 등록하는 컨벤션이었고, `infra` 저장소만 아직 등록이 안 된 상태였음
+  - `.github/workflows/rca-agent-build-push.yml`을 액세스 키 방식으로 원복: `configure-aws-credentials`가 다시 `secrets.AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` 사용, `permissions.id-token: write` 제거
+  - `infra` 저장소에 `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` repo-level Secrets 등록 완료(2026-08-27, 사용자) — 남은 건 실제 CI 실행 확인뿐, `.harness/PLAN.md` 참고

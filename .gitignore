@@ -1,3 +1,5 @@
 *.values-secret.yaml
 .env
 kubeconfig*
+__pycache__/
+*.pyc
