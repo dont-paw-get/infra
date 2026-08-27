@@ -5,7 +5,7 @@ on:
     branches:
       - develop
     paths:
-      - "monitoring/rca-agent/**"
+      - "monitoring/**"
   workflow_dispatch: {}
 
 # ECR 로그인에 IAM 유저 Access Key / Secret Key 사용 (이 저장소의 repo-level Secrets, docs/adr/0006-ci-access-key-revert.md).
@@ -58,8 +58,19 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if git diff --quiet "$KFILE"; then
             echo "이미지 태그 변경 없음"
-          else
-            git add "$KFILE"
-            git commit -m "chore(rca-agent): [skip ci] 이미지 태그를 ${IMAGE_TAG}로 갱신"
-            git push origin "HEAD:${{ github.ref_name }}"
+            exit 0
           fi
+          git add "$KFILE"
+          git commit -m "chore(rca-agent): [skip ci] 이미지 태그를 ${IMAGE_TAG}로 갱신"
+          # 빌드하는 동안 develop에 다른 커밋이 push되면 non-fast-forward로 거부될 수 있어
+          # rebase 후 재시도한다. 이 커밋은 kustomization.yaml 한 줄만 바꾸므로 충돌 가능성이 낮다.
+          for i in 1 2 3 4 5; do
+            if git push origin "HEAD:${{ github.ref_name }}"; then
+              exit 0
+            fi
+            echo "push 거부됨, rebase 후 재시도 ($i/5)"
+            git fetch origin "${{ github.ref_name }}"
+            git rebase "origin/${{ github.ref_name }}"
+          done
+          echo "5회 재시도 후에도 push 실패"
+          exit 1

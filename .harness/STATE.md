@@ -61,4 +61,8 @@
 - [x] `external-secrets-config`에 `syncPolicy.retry`(limit 5, backoff 10s~3m) 추가 (2026-08-27) — 처음엔 "discovery 캐시 지연"이 원인이라 추정했으나, 실제 클러스터 로그로 확인한 진짜 원인은 아래 항목(API 버전 불일치)이었음. retry 자체는 무해하니 유지
 - [x] ArgoCD 동기화 실패(ExternalSecret/ClusterSecretStore API 버전 불일치) 수정 (2026-08-27) — `kubectl describe application external-secrets-config -n argocd`로 실제 원인 확인: `"Version \"v1beta1\" of external-secrets.io/ExternalSecret ... Version \"v1\" ... is installed on the destination cluster"`. external-secrets 차트 2.9.0이 설치한 CRD는 `v1beta1`을 서빙하지 않고 `v1`만 서빙하는데 매니페스트는 `v1beta1`로 작성돼 있었음
   - 수정: `monitoring/external-secrets/cluster-secret-store.yaml`(ClusterSecretStore), `grafana-admin-credentials.yaml`/`discord-webhook.yaml`(ExternalSecret) 모두 `apiVersion: external-secrets.io/v1beta1` → `external-secrets.io/v1`로 변경
-  - 배포 후 확인 필요: `kubectl apply -f monitoring/argocd/external-secrets-config.yaml` 후 ArgoCD Hard Refresh + Sync, `kubectl get externalsecret -n monitoring`으로 Ready 상태 확인 — `.harness/PLAN.md` 참고
+  - 2026-08-27 사용자 확인: ArgoCD Hard Refresh + Sync 후 `rca-agent`를 제외한 모든 Application이 `Synced`/`Healthy`로 전환됨 — dev 클러스터 부트스트랩 사실상 완료. 남은 건 `rca-agent`의 ECR push 권한 문제뿐(`.harness/PLAN.md` 참고)
+- [x] `rca-agent-build-push.yml` CI 안정성 개선 (2026-08-27)
+  - IAM 사용자 `gha-ecr-pusher`에 ECR push 권한 추가(사용자) 후 빌드/push는 성공했으나, "Re-run failed jobs"가 워크플로를 원래 트리거된 옛날 커밋 그대로 재실행하는 바람에 그 사이 develop이 2커밋 더 진행돼 있어 마지막 `kustomization.yaml` 태그 갱신 커밋의 `git push`가 non-fast-forward로 거부됨
+  - 수정: push 실패 시 `git fetch` + `git rebase` 후 최대 5회 재시도하도록 "Bump image tag (GitOps)" 스텝 변경
+  - 사용자 결정(2026-08-27): 트리거 경로를 `monitoring/rca-agent/**`에서 `monitoring/**` 전체로 넓힘 — RCA Agent 소스와 무관한 monitoring 변경에도 이미지가 재빌드/재배포되는 트레이드오프를 감수하기로 함(트리거 범위가 넓어져 동시 실행 가능성도 커진 만큼 위 rebase 재시도 로직과 짝을 이룸)

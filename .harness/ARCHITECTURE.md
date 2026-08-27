@@ -72,7 +72,8 @@ Grafana Alerting 발화(webhook)를 받아 Bedrock 기반으로 원인을 분석
 
 ## CI (GitHub Actions)
 
-- `.github/workflows/rca-agent-build-push.yml`: `monitoring/rca-agent/**` 변경이 `develop`에 push되면 이미지를 빌드해 ECR(`dpgy-infra-rca-agent`)에 push하고, `monitoring/rca-agent/k8s/kustomization.yaml`의 `images.newTag`를 커밋 SHA로 갱신(GitOps) — ArgoCD가 이 커밋을 감지해 재배포한다.
+- `.github/workflows/rca-agent-build-push.yml`: `monitoring/**` 변경이 `develop`에 push되면 이미지를 빌드해 ECR(`dpgy-infra-rca-agent`)에 push하고, `monitoring/rca-agent/k8s/kustomization.yaml`의 `images.newTag`를 커밋 SHA로 갱신(GitOps) — ArgoCD가 이 커밋을 감지해 재배포한다. 트리거 경로는 원래 `monitoring/rca-agent/**`였으나 사용자 결정(2026-08-27)으로 `monitoring/**` 전체로 넓혔다 — RCA Agent 소스가 안 바뀐 monitoring 변경(alerting/argocd/values 등)에도 이미지가 재빌드/재배포되는 트레이드오프를 감수하기로 함.
+- push 성공 후 `kustomization.yaml` 갱신 커밋이 non-fast-forward로 거부될 경우 `fetch`+`rebase` 후 최대 5회 재시도한다 — 트리거 범위가 넓어져 동시 실행 가능성이 커진 만큼 이 재시도 로직이 중요하다.
 - CI → AWS 인증은 IAM 사용자 액세스 키(`secrets.AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, `infra` 저장소 repo-level Secrets) 방식이다. 이 조직은 Secrets를 조직 레벨이 아니라 저장소별로 등록하는 컨벤션이라, `infra` 저장소도 자체적으로 ECR push 전용 IAM 사용자의 키를 등록한다 — 결정 배경은 `docs/adr/0006-ci-access-key-revert.md` 참고(한때 GitHub OIDC로 전환을 검토했으나 `docs/adr/0005-github-actions-oidc.md`는 대체됨).
 
 ## 서비스 저장소와의 경계

@@ -34,11 +34,10 @@ Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받
 
 ## dev 클러스터 배포 검증 (부트스트랩 중 실제 발견된 이슈)
 
-`kubectl get application -n argocd`로 확인한 실제 상태(2026-08-27) 기준. 자세한 진단 경위는 `.harness/STATE.md` 참고.
+2026-08-27 사용자 확인: `rca-agent`를 제외한 모든 Application이 `Synced`/`Healthy`. 자세한 진단 경위는 `.harness/STATE.md` 참고.
 
-- [ ] `monitoring/external-secrets/*.yaml`의 apiVersion 수정(v1beta1→v1) 커밋 → `kubectl apply -f monitoring/argocd/external-secrets-config.yaml` 재적용 → ArgoCD Hard Refresh + Sync → `kubectl get externalsecret -n monitoring`으로 Ready 확인
-- [ ] IAM 사용자 `gha-ecr-pusher`에 ECR push 권한(`InitiateLayerUpload` 등) 추가 후 CI 재실행 → `rca-agent` 이미지가 정상 pull되는지 확인 (현재 Application `rca-agent` Degraded, `ImagePullBackOff`)
-- [ ] 위 두 항목 해소 후 `kube-prometheus-stack`(Degraded — grafana-admin-credentials Secret 생기면 해소될 가능성 높음), `loki`(Progressing — `loki-0` pod pending 원인 미확인, PVC 바인딩 지연 등 확인 필요) Application 상태 재확인
+- [ ] IAM 사용자 `gha-ecr-pusher`에 ECR push 권한(`ecr:BatchCheckLayerAvailability`/`InitiateLayerUpload`/`UploadLayerPart`/`CompleteLayerUpload`/`PutImage`/`BatchGetImage`, 리소스는 `dpgy-infra-rca-agent` 리포지토리로 스코프) 추가 후 CI 재실행(Actions 탭에서 Re-run failed jobs) → 이미지 push 성공 확인
+- [ ] 이미지 push 성공 후 `rca-agent` Application이 새 이미지를 pull해 `Synced`/`Healthy`로 전환되는지 확인 (현재 `ImagePullBackOff`)
 
 ## 서비스 저장소 연동
 
