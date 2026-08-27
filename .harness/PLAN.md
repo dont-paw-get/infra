@@ -32,6 +32,14 @@ Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받
 - [ ] CI 파이프라인 실제 동작 확인 — `infra` 저장소에 `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` 등록 완료(2026-08-27, 사용자). `monitoring/rca-agent/**` 변경을 `develop`에 push하거나 Actions 탭에서 `rca-agent-build-push.yml`을 workflow_dispatch로 수동 실행해 ECR push/이미지 태그 갱신 커밋이 성공하는지 확인 필요
 - [ ] Agent 장애/타임아웃 시 재시도·알림 정책 (RCA 실패를 어떻게 가시화할지) — ADR-0002 미결정 항목
 
+## dev 클러스터 배포 검증 (부트스트랩 중 실제 발견된 이슈)
+
+`kubectl get application -n argocd`로 확인한 실제 상태(2026-08-27) 기준. 자세한 진단 경위는 `.harness/STATE.md` 참고.
+
+- [ ] `monitoring/external-secrets/*.yaml`의 apiVersion 수정(v1beta1→v1) 커밋 → `kubectl apply -f monitoring/argocd/external-secrets-config.yaml` 재적용 → ArgoCD Hard Refresh + Sync → `kubectl get externalsecret -n monitoring`으로 Ready 확인
+- [ ] IAM 사용자 `gha-ecr-pusher`에 ECR push 권한(`InitiateLayerUpload` 등) 추가 후 CI 재실행 → `rca-agent` 이미지가 정상 pull되는지 확인 (현재 Application `rca-agent` Degraded, `ImagePullBackOff`)
+- [ ] 위 두 항목 해소 후 `kube-prometheus-stack`(Degraded — grafana-admin-credentials Secret 생기면 해소될 가능성 높음), `loki`(Progressing — `loki-0` pod pending 원인 미확인, PVC 바인딩 지연 등 확인 필요) Application 상태 재확인
+
 ## 서비스 저장소 연동
 
 - [ ] `ServiceMonitor`/`PodMonitor` CR을 실제로 각 서비스 저장소(`backend-book` 등)에 추가하도록 해당 팀에 전달 (이 저장소 범위 밖 — ADR-0001 참고)

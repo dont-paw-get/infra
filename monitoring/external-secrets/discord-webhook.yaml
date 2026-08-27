@@ -3,7 +3,7 @@
 # kube-prometheus-stack values.yaml의 grafana.envValueFrom이 이 Secret을 Grafana 파드의
 # DISCORD_WEBHOOK_URL 환경변수로 주입하고, monitoring/alerting/contact-points/discord.yaml이
 # $__env{DISCORD_WEBHOOK_URL}로 참조한다.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: discord-webhook
