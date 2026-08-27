@@ -6,7 +6,9 @@
 
 Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(클러스터에 이미 준비됨) — 이 저장소는 `monitoring/argocd/`의 `Application` CR과 배포 대상 매니페스트만 소유한다. App-of-Apps 루트 없이 개별(flat) 등록이며, 최초 1회만 `scripts/install.sh`(또는 `kubectl apply -f monitoring/argocd/`)로 등록하면 이후는 ArgoCD가 자동 동기화(`automated: selfHeal + prune`)한다. `backend-auth` 저장소의 ArgoCD+Kustomize 컨벤션을 따른다 — 모든 `Application`은 `targetRevision: develop`(dev/prod로 나뉘지 않는 단일 인프라이므로 실사용 브랜치를 그대로 추적)과 `finalizers: [resources-finalizer.argocd.argoproj.io]`를 둔다. 결정 배경은 `docs/adr/0003-argocd-gitops.md` 참고.
 
-`sync-wave`로 동기화 순서를 보장한다: External Secrets Operator(-2) → ClusterSecretStore/ExternalSecret(-1) → kube-prometheus-stack/Loki/Alloy/alerting(0).
+`sync-wave`로 동기화 순서를 보장한다: External Secrets Operator·StorageClass(-2) → ClusterSecretStore/ExternalSecret(-1) → kube-prometheus-stack/Loki/Alloy/alerting(0).
+
+`monitoring/storage-class/`(`monitoring/argocd/storage-class.yaml`, wave -2)는 EKS Auto Mode용 EBS StorageClass(`auto-ebs-sc`)를 배포한다 — kube-prometheus-stack/Loki의 PVC가 이를 참조하므로 그보다 먼저 동기화되어야 한다. external-secrets와 같은 이유(순수 K8s 매니페스트 디렉터리)로 Kustomize 없이 둔다.
 
 `external-secrets`, `kube-prometheus-stack` Application은 `syncOptions: [ServerSideApply=true]`를 둔다 — 두 차트가 설치하는 CRD(ClusterSecretStore/SecretStore, Prometheus/Alertmanager/PrometheusRule 등)가 client-side apply의 `last-applied-configuration` 어노테이션 한도(262144 bytes)를 넘어 동기화가 실패하기 때문(2026-08-27 실제 발생 확인). Loki/Alloy는 자체 CRD가 없어 이 옵션이 필요 없다.
 
@@ -29,11 +31,11 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 
 - Prometheus가 `serviceMonitorSelectorNilUsesHelmValues: false`로 설정되어 전 네임스페이스의 `ServiceMonitor`/`PodMonitor`를 스크레이핑 대상으로 인식한다.
 - Alertmanager는 비활성화(`alertmanager.enabled: false`) — 알림은 Grafana Alerting이 담당.
-- Prometheus 보존/스토리지 확정값: 15d / PVC 20Gi. `storageClassName: gp2` 명시 — 클러스터(EKS Auto Mode)에 default StorageClass가 없고 `gp2`(in-tree `kubernetes.io/aws-ebs` provisioner)만 존재해(2026-08-27 확인) 명시하지 않으면 PVC가 영원히 Pending으로 남는다.
+- Prometheus 보존/스토리지 확정값: 15d / PVC 20Gi. `storageClassName: auto-ebs-sc`(`monitoring/storage-class/`) 명시 — `gp2`(in-tree `kubernetes.io/aws-ebs`)는 CSI 마이그레이션으로 실제론 표준 AWS EBS CSI 드라이버(`ebs.csi.aws.com`)를 기다리는데 이 클러스터(EKS Auto Mode)엔 그 드라이버가 없어 PVC가 영원히 Pending으로 남는다(2026-08-27 실제 발생 확인) — Auto Mode 전용 드라이버(`ebs.csi.eks.amazonaws.com`)를 쓰는 `auto-ebs-sc`로 전환.
 
 ## 로그
 
-- Loki는 SingleBinary 모드, `singleBinary.persistence.storageClass: gp2` 명시(위 Prometheus와 같은 이유), 오브젝트 스토리지는 S3(`dpgy-infra-loki-logs`, `ap-northeast-2`, IRSA 인증), 보존 336h(14d) 확정 — 결정 배경은 `docs/adr/0004-loki-s3-storage.md` 참고. `compactor.retention_enabled: true`가 있어야 보존 기간이 실제로 적용된다. SimpleScalable 타겟(`read`/`write`/`backend`)은 차트 기본 replicas(3)와 SingleBinary 모드가 충돌하므로 명시적으로 0으로 둔다.
+- Loki는 SingleBinary 모드, `singleBinary.persistence.storageClass: auto-ebs-sc` 명시(위 Prometheus와 같은 이유), 오브젝트 스토리지는 S3(`dpgy-infra-loki-logs`, `ap-northeast-2`, IRSA 인증), 보존 336h(14d) 확정 — 결정 배경은 `docs/adr/0004-loki-s3-storage.md` 참고. `compactor.retention_enabled: true`가 있어야 보존 기간이 실제로 적용된다. SimpleScalable 타겟(`read`/`write`/`backend`)은 차트 기본 replicas(3)와 SingleBinary 모드가 충돌하므로 명시적으로 0으로 둔다.
 - Loki의 S3 접근은 IRSA(`arn:aws:iam::594532711953:role/dpgy-infra-loki`) — IAM Role 생성은 아직 안 됨, `.harness/PLAN.md` 참고.
 - Alloy가 DaemonSet으로 모든 노드에서 컨테이너 stdout을 수집해 `loki-gateway.monitoring.svc.cluster.local`로 전송한다.
 - 애플리케이션은 stdout에 JSON 구조화 로그(`level` 필드 포함)를 출력해야 `monitoring/alerting/rules/log-error-spike.yaml`의 LogQL이 동작한다.

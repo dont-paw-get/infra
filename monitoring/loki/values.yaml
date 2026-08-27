@@ -49,9 +49,11 @@ singleBinary:
   persistence:
     enabled: true
     size: 20Gi
-    # 클러스터(EKS Auto Mode)에 default StorageClass가 없어 명시적으로 지정해야 한다.
-    # 실제 존재하는 StorageClass는 gp2뿐(2026-08-27 확인, kubectl get storageclass).
-    storageClass: gp2
+    # gp2(레거시 in-tree)는 CSI 마이그레이션으로 표준 AWS EBS CSI 드라이버(ebs.csi.aws.com)를
+    # 기다리는데 이 클러스터(EKS Auto Mode)엔 그 드라이버가 없어 PVC가 영원히 Pending이 된다
+    # (2026-08-27 실제 발생 확인). Auto Mode 전용 드라이버를 쓰는 auto-ebs-sc로 전환
+    # (monitoring/storage-class/) — .harness/DECISIONS.md 참고.
+    storageClass: auto-ebs-sc
 
 # SimpleScalable 타겟(read/write/backend)은 차트 기본값이 replicas: 3이라
 # deploymentMode: SingleBinary와 함께 두면 `helm template`이 검증 에러를 낸다 — 명시적으로 0으로 둔다.

@@ -29,15 +29,15 @@ Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받
 - [ ] Bedrock에서 `anthropic.claude-sonnet-5` 최초 호출 전 Anthropic use case 양식 제출 확인 — AWS가 2025-10 Model access 콘솔 페이지를 폐지, 모델은 첫 호출 시 자동 활성화되나 Anthropic 모델만 예외로 `PutUseCaseForModelAccess`(1회성 양식) 제출이 필요함. Bedrock 콘솔 Model catalog > Claude Sonnet 5 > Playground에서 첫 메시지를 보내 양식 제출/확인
   - 2026-08-26: 사용자 계정에 현재 권한 없음 확인 — 관리자에게 권한 요청 예정, 응답 대기 중 (blocked)
 - [ ] (백로그) k8s 이벤트/describe pod 조회 tool 추가 — CrashLoopBackOff/OOMKilled 원인(재시작 사유, 리소스 limit 초과 등) 파악에 유용하나, `rca-agent-irsa` ServiceAccount에 새 Kubernetes RBAC(get/list pods, events) 부여가 필요해 별도 논의 후 진행. 현재는 Prometheus/Loki만 조회하는 순수 read 권한만 있음
-- [ ] CI 파이프라인 실제 동작 확인 — `infra` 저장소에 `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` 등록 완료(2026-08-27, 사용자). `monitoring/rca-agent/**` 변경을 `develop`에 push하거나 Actions 탭에서 `rca-agent-build-push.yml`을 workflow_dispatch로 수동 실행해 ECR push/이미지 태그 갱신 커밋이 성공하는지 확인 필요
 - [ ] Agent 장애/타임아웃 시 재시도·알림 정책 (RCA 실패를 어떻게 가시화할지) — ADR-0002 미결정 항목
 
 ## dev 클러스터 배포 검증 (부트스트랩 중 실제 발견된 이슈)
 
-2026-08-27 사용자 확인: `rca-agent`를 제외한 모든 Application이 `Synced`/`Healthy`. 자세한 진단 경위는 `.harness/STATE.md` 참고.
+2026-08-27 사용자 확인: `rca-agent` 포함 대부분 Application이 `Synced`/`Healthy`. 자세한 진단 경위는 `.harness/STATE.md`/`DECISIONS.md` 참고.
 
-- [ ] `gha-ecr-pusher` IAM 권한 추가 후 이미지 push는 성공(2026-08-27) — `rca-agent` 파드가 재시도(`kubectl rollout restart deployment/rca-agent -n monitoring`)로 `Running`/`Healthy` 전환됐는지 최종 확인 필요
-- [ ] Loki/Prometheus PVC `storageClass: gp2` 수정 배포 후 `loki-0`/Prometheus 파드가 PVC 바인딩되어 `Running`으로 전환되는지 확인 (`kubectl get pvc -n monitoring`, `kubectl get pods -n monitoring`)
+- [ ] 신규 Application `monitoring/argocd/storage-class.yaml`을 최초 1회 수동 적용(App-of-Apps가 아니라 flat 등록이라 git 커밋만으로는 반영 안 됨): `kubectl apply -f monitoring/argocd/storage-class.yaml`
+- [ ] 그 다음 `loki`/`kube-prometheus-stack` Hard Refresh + Sync → `kubectl get pvc -n monitoring`에서 `auto-ebs-sc`로 `Bound`되는지, `kubectl get pods -n monitoring`에서 `loki-0`/Prometheus 파드가 `Running`으로 전환되는지 확인
+- [ ] Prometheus는 StatefulSet 자체가 아직 생성된 적이 없어(`kubectl get statefulset -n monitoring`에 없음) storage-class 배포 후에도 operator가 정상적으로 STS를 만드는지 별도 확인 필요 — 안 만들어지면 `kube-prometheus-stack-operator` 파드 로그 확인
 
 ## 서비스 저장소 연동
 

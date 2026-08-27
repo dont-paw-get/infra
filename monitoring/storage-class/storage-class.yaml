@@ -1,0 +1,17 @@
+# EKS Auto Mode의 EBS CSI 드라이버(ebs.csi.eks.amazonaws.com)를 사용하는 StorageClass.
+# 클러스터에 이미 있던 gp2(kubernetes.io/aws-ebs, 레거시 in-tree)는 CSI 마이그레이션으로 인해
+# 실제로는 표준 AWS EBS CSI 드라이버(ebs.csi.aws.com)를 기다리는데, 이 애드온이 설치돼 있지 않아
+# PVC가 영원히 Pending으로 남는 문제가 있었다(2026-08-27 실제 발생 확인 — .harness/DECISIONS.md 참고).
+# Auto Mode가 자체 관리하는 드라이버를 쓰도록 이 StorageClass로 전환한다.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: auto-ebs-sc
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: ebs.csi.eks.amazonaws.com
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+parameters:
+  type: gp3
+  encrypted: "true"
