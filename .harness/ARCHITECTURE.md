@@ -60,11 +60,16 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 
 Grafana Alerting 발화(webhook)를 받아 Bedrock 기반으로 원인을 분석하고 Discord에 후속 메시지를 보고하는 read-only Agent. 결정 배경은 `docs/adr/0002-anomaly-rca-agent.md` 참고.
 
-- `src/`: FastAPI 서버(`main.py`, `/webhook`)가 Grafana 알림을 받아 `analyzer.py`(Strands SDK `Agent` + Bedrock + Prometheus/Loki 쿼리 tool)를 호출하고, 결과를 `notifier.py`가 Discord webhook으로 전송. 프롬프트/쿼리 전략은 최소 동작 스켈레톤 수준(`.harness/PLAN.md`에 다듬기 항목 있음).
+- `src/`: FastAPI 서버(`main.py`, `/webhook`)가 Grafana 알림을 받아 `analyzer.py`(Strands SDK `Agent` + Bedrock + Prometheus/Loki 쿼리 tool)를 호출하고, 결과를 `notifier.py`가 Discord webhook으로 전송. system prompt가 알림 5종별 라벨/조사 순서를 안내하고, `query_prometheus`(instant)/`query_prometheus_range`(추세)/`query_loki` 3개 tool을 제공한다. 각 tool은 실패해도 예외를 던지지 않고 실패 문자열을 반환(부분 실패 허용), 응답은 8000자로 truncate. k8s 이벤트/describe pod 조회는 RBAC 확장이 필요해 아직 없음(`.harness/PLAN.md` 백로그).
 - 배포: `monitoring/rca-agent/k8s/`(Kustomize) — IRSA `ServiceAccount`(`rca-agent-irsa`), `ConfigMap`(Bedrock 리전/모델, Prometheus/Loki 엔드포인트), `Deployment`(image는 ECR placeholder), `Service`(`rca-agent:8080`). `monitoring/argocd/rca-agent.yaml`(sync-wave 0)로 동기화.
 - Prometheus/Loki는 Alloy와 동일하게 클러스터 내부 서비스 DNS(`prometheus-operated`, `loki-gateway`)로 별도 인증 없이 접근.
 - Bedrock 인증은 IRSA(`arn:aws:iam::594532711953:role/dpgy-infra-rca-agent`, 생성 완료 — 권한은 `foundation-model/anthropic.claude-sonnet-5`로 스코프). 모델은 `anthropic.claude-sonnet-5`로 확정.
 - 클러스터 쓰기 권한 없음 (read-only 분석/보고 전용).
+
+## CI (GitHub Actions)
+
+- `.github/workflows/rca-agent-build-push.yml`: `monitoring/rca-agent/**` 변경이 `develop`에 push되면 이미지를 빌드해 ECR(`dpgy-infra-rca-agent`)에 push하고, `monitoring/rca-agent/k8s/kustomization.yaml`의 `images.newTag`를 커밋 SHA로 갱신(GitOps) — ArgoCD가 이 커밋을 감지해 재배포한다.
+- CI → AWS 인증은 IAM 사용자 액세스 키(`secrets.AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, `infra` 저장소 repo-level Secrets) 방식이다. 이 조직은 Secrets를 조직 레벨이 아니라 저장소별로 등록하는 컨벤션이라, `infra` 저장소도 자체적으로 ECR push 전용 IAM 사용자의 키를 등록한다 — 결정 배경은 `docs/adr/0006-ci-access-key-revert.md` 참고(한때 GitHub OIDC로 전환을 검토했으나 `docs/adr/0005-github-actions-oidc.md`는 대체됨).
 
 ## 서비스 저장소와의 경계
 

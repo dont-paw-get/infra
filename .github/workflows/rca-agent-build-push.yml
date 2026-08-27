@@ -8,7 +8,7 @@ on:
       - "monitoring/rca-agent/**"
   workflow_dispatch: {}
 
-# ECR 로그인에 IAM 유저 Access Key / Secret Key 사용
+# ECR 로그인에 IAM 유저 Access Key / Secret Key 사용 (이 저장소의 repo-level Secrets, docs/adr/0006-ci-access-key-revert.md).
 permissions:
   contents: write        # kustomization.yaml 이미지 태그 갱신 커밋을 위해
 

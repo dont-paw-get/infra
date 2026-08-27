@@ -26,11 +26,10 @@ ALB Ingress로 노출은 확정했지만(2026-08-26, 사용자 확인) 도메인
 Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받아 RCA를 수행하고 Discord에 보고하는 Agent를 `monitoring` 네임스페이스(공유 인프라)에 추가했다. 결정 근거와 배경은 `docs/adr/0002-anomaly-rca-agent.md` 참고.
 
 **남은 작업**
-- [ ] Bedrock 프롬프트/도구(PromQL·LogQL 조사 전략) 다듬기 — `monitoring/rca-agent/src/analyzer.py`는 최소 동작 스켈레톤 수준
-- [ ] Bedrock 콘솔에서 `anthropic.claude-sonnet-5` 모델 액세스(Model access) 승인 여부 확인
-- [ ] ECR 저장소 `dpgy-infra-rca-agent` 생성 (AWS 콘솔/CLI, `ap-northeast-2`) — 아직 없음. `.github/workflows/rca-agent-build-push.yml`(CI)과 `monitoring/rca-agent/k8s/kustomization.yaml`(images.newTag)은 이미 구성됨
-- [ ] GitHub 저장소 Secrets에 `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` 등록 — ECR push 권한을 가진 IAM 사용자 필요 (CI 전용, 이 저장소 범위 밖)
-- [ ] (백로그) CI 인증을 정적 액세스 키 대신 GitHub OIDC(`role-to-assume`)로 전환 검토 — 이 저장소의 다른 컴포넌트는 전부 IRSA를 쓰는 것과 통일성
+- [ ] Bedrock에서 `anthropic.claude-sonnet-5` 최초 호출 전 Anthropic use case 양식 제출 확인 — AWS가 2025-10 Model access 콘솔 페이지를 폐지, 모델은 첫 호출 시 자동 활성화되나 Anthropic 모델만 예외로 `PutUseCaseForModelAccess`(1회성 양식) 제출이 필요함. Bedrock 콘솔 Model catalog > Claude Sonnet 5 > Playground에서 첫 메시지를 보내 양식 제출/확인
+  - 2026-08-26: 사용자 계정에 현재 권한 없음 확인 — 관리자에게 권한 요청 예정, 응답 대기 중 (blocked)
+- [ ] (백로그) k8s 이벤트/describe pod 조회 tool 추가 — CrashLoopBackOff/OOMKilled 원인(재시작 사유, 리소스 limit 초과 등) 파악에 유용하나, `rca-agent-irsa` ServiceAccount에 새 Kubernetes RBAC(get/list pods, events) 부여가 필요해 별도 논의 후 진행. 현재는 Prometheus/Loki만 조회하는 순수 read 권한만 있음
+- [ ] CI 파이프라인 실제 동작 확인 — `infra` 저장소에 `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` 등록 완료(2026-08-27, 사용자). `monitoring/rca-agent/**` 변경을 `develop`에 push하거나 Actions 탭에서 `rca-agent-build-push.yml`을 workflow_dispatch로 수동 실행해 ECR push/이미지 태그 갱신 커밋이 성공하는지 확인 필요
 - [ ] Agent 장애/타임아웃 시 재시도·알림 정책 (RCA 실패를 어떻게 가시화할지) — ADR-0002 미결정 항목
 
 ## 서비스 저장소 연동
