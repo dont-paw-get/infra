@@ -2,6 +2,26 @@
 
 `docs/adr/`에 없는 소규모/운영 결정의 역사 (append-only, 최신이 위). 아키텍처 수준 결정(스택 선정, 호스팅 방식 등)은 여기가 아니라 `docs/adr/`에 기록한다.
 
+## 2026-08-29 — RCA Agent webhook을 `discord-webhook` contact point에서 임시 제거
+
+`relativeTimeRange` 수정으로 알림이 처음 동작하기 시작하자마자, Grafana가 알림을 못 보내기 시작했다:
+
+```
+level=error component=dispatcher msg="Notify for alerts failed"
+  err="discord-webhook/webhook[0]: notify retry canceled due to unrecoverable error after 1 attempts:
+       Post \"<redacted>\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"
+```
+
+`monitoring/alerting/contact-points/discord.yaml`의 `discord-webhook` contact point 하나에 `discord[0]`(실제 Discord)과 `webhook[0]`(rca-agent) 두 receiver가 함께 들어 있었다. Grafana는 **contact point 단위로 notify 성공/실패를 판정**하므로, rca-agent 전송이 실패하면 Discord 전송이 성공했더라도 그 contact point 전체를 실패로 보고 재시도한다 — Discord에 같은 알림이 중복 발송되고, 재시도가 소진되면 그룹 전체가 드롭된다. ADR-0002 결정 #3이 의도한 "두 경로 독립"은 **같은 contact point 안에서는 성립하지 않는다**는 것이 실제로 확인됐다.
+
+rca-agent 쪽 실패의 근본 원인은 별개다 — `main.py`의 `async def webhook`이 블로킹 `analyze()`(Bedrock 30~60s)를 직접 호출해 이벤트 루프가 멈추고, `/healthz`가 응답하지 못해 liveness probe(`timeoutSeconds: 1`, `failureThreshold: 3`)가 파드를 죽인다(`RESTARTS 53`). Grafana의 webhook 요청도 같은 이유로 타임아웃된다.
+
+**결정(1단계, 완화):** `discord.yaml`에서 `rca-agent-webhook-receiver`를 제거해 Discord 알림 경로를 먼저 정상화한다. RCA 트리거는 일시 중단된다.
+
+**결정(2단계, 예정):** rca-agent webhook을 **별도 contact point**로 분리하고 `notification-policy.yaml`에서 `continue: true` route로 양쪽에 라우팅해 재도입한다. 이렇게 해야 Grafana가 두 경로의 성공/실패를 독립적으로 판정한다. 함께 `main.py`의 `analyze()` 백그라운드 실행 + probe 파라미터 완화도 적용한다 — `.harness/PLAN.md` 참고.
+
+**영향받은 파일:** `monitoring/alerting/contact-points/discord.yaml`.
+
 ## 2026-08-29 — Grafana 알림 규칙에 `relativeTimeRange` 추가 (규칙이 하나도 로드 안 되던 문제)
 
 Phase 2(실제 장애 주입) 첫 시나리오에서 `rca-test` 파드를 CrashLoopBackOff로 만들었는데(`kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}=1` 확인) RCA Agent에 webhook이 오지 않았다. 조사 결과 Grafana에 **알림 규칙이 하나도 로드돼 있지 않았다**(`/api/v1/provisioning/alert-rules` → `[]`). Grafana 컨테이너 로그:

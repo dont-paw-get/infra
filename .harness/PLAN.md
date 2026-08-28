@@ -31,22 +31,35 @@ Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받
 - [ ] (백로그) k8s 이벤트/describe pod 조회 tool 추가 — CrashLoopBackOff/OOMKilled 원인(재시작 사유, 리소스 limit 초과 등) 파악에 유용하나, `rca-agent-irsa` ServiceAccount에 새 Kubernetes RBAC(get/list pods, events) 부여가 필요해 별도 논의 후 진행. 현재는 Prometheus/Loki만 조회하는 순수 read 권한만 있음
 - [ ] Agent 장애/타임아웃 시 재시도·알림 정책 (RCA 실패를 어떻게 가시화할지) — ADR-0002 미결정 항목
 
-## Grafana 알림 규칙 relativeTimeRange 누락 수정 (Phase 2 진행 중 발견) — 배포 대기
-
-Phase 2 시나리오 A 실행 중 발견: `monitoring/alerting/rules/*.yaml`에 `relativeTimeRange`가 없어
-Grafana가 프로비저닝을 통째로 거부, **알림 규칙이 0개 로드**된 상태였다. 경위·확인 방법은 `.harness/DECISIONS.md` 2026-08-29 항목.
-- [x] 규칙 파일 5개에 `relativeTimeRange: {from: 600, to: 0}` 추가 (A·C 양쪽), `kubectl kustomize` 렌더링 확인
-- [ ] 커밋 → `develop` 병합 → ArgoCD `alerting` sync → Grafana sidecar 반영
-- [ ] 검증: 포트포워드 후 `curl -u admin:<pw> localhost:3000/api/v1/provisioning/alert-rules`가 규칙 반환, Grafana 로그에 reload 500 사라짐, "Cluster Alerts" 폴더에 규칙 3종 표시
-- [ ] 이게 되어야 Phase 2가 의미 있음 — 그 전에는 어떤 장애를 넣어도 알림이 안 뜬다
-
-## RCA Agent 테스트 — Phase 2 (실제 장애 주입 E2E) — 규칙 수정 배포 후 실행
+## RCA Agent 테스트 — Phase 2 (실제 장애 주입 E2E)
 
 Phase 1(합성 webhook 스모크 테스트)은 완료 — `.harness/STATE.md` 참고.
 사용자 결정(2026-08-28): 시나리오 A/B/C/D 전부, 브랜치 `CLIAR-159` 재사용.
-**선행조건: 위 "Grafana 알림 규칙 relativeTimeRange 누락 수정"이 배포·검증되어야 한다.**
 
-2026-08-29 시나리오 A 1차 시도: 파드 CrashLoopBackOff 메트릭까지 확인했으나 규칙 미로드로 webhook 미발화 → 워크로드·`rca-test` ns 정리함.
+**선행조건 완료 (2026-08-29):** 알림 규칙 `relativeTimeRange` 수정 PR #5 병합 → ArgoCD `grafana-alerting` sync →
+`/api/v1/provisioning/alert-rules`가 규칙 4종 반환(CrashLoopBackOff/OOMKilled/PVC/로그), Grafana 로그 reload 500 소멸, 전 규칙 `health: ok` 확인.
+
+2026-08-29 시나리오 A 1차 시도(규칙 수정 전): CrashLoopBackOff 메트릭까지 확인했으나 규칙 미로드로 webhook 미발화 → 워크로드·`rca-test` ns 정리함.
+
+**2026-08-29 시나리오 A 2차 시도 결과 — 규칙은 발화했으나 버그 3개 추가 발견 (수정 계획 컨펌 대기)**
+
+`rca-test` crashloop 파드 배포 → `파드 CrashLoopBackOff` 규칙이 `namespace="rca-test"`로 **정상 발화**(Grafana `Sending alerts to local notifier`, aggrGroup에 rca-test 확인). 규칙 자체는 문제없음. 그러나 RCA 후속 메시지가 안 옴:
+
+- **버그 1 (심각) — RCA Agent가 liveness probe로 계속 죽는다.** `main.py`의 `async def webhook`이 블로킹 `analyze()`(Strands 동기 호출, Bedrock 30~60s)를 그대로 호출 → 이벤트 루프 정지 → `/healthz` 응답 불가 → liveness(`timeout=1s period=10s failure=3`) 3회 실패 → kubelet이 파드 kill. `RESTARTS 53`, CrashLoopBackOff. Grafana webhook도 ~30s에 타임아웃. Phase 1(curl)이 됐던 건 curl이 오래 기다려줬고 probe 타이밍이 운좋게 맞았을 뿐.
+  - 수정: `/webhook`은 즉시 200 반환하고 `analyze()`를 백그라운드 스레드로(`BackgroundTasks` + `asyncio.to_thread`/`run_in_executor`). `deployment.yaml` probe 완화(`timeoutSeconds: 3`, `failureThreshold: 5`, liveness/readiness 분리, `initialDelaySeconds`).
+- **버그 2 (심각) — contact point가 결합돼 있어 webhook 실패가 Discord까지 망가뜨린다.** `discord.yaml`의 `discord-webhook` receiver 하나에 `discord[0]`(실제 Discord)와 `webhook[0]`(rca-agent)이 같이 있음. webhook[0]이 실패하면 Grafana가 receiver 전체 notify를 실패로 보고 **전체 재시도** → Discord 중복 발송 + 결국 `unrecoverable error`로 드롭. ADR-0002 결정 #3 "두 경로 독립"의 의도와 어긋남(같은 receiver = 독립 아님).
+  - 수정: `rca-agent-webhook`을 **별도 contact point**로 분리하고 `notification-policy.yaml`에서 `continue: true` route로 양쪽에 라우팅. rca-agent 장애가 Discord에 영향 0이 되도록.
+- **버그 3 (중간) — `로그 ERROR 급증` 규칙이 `health: error`(`DatasourceError` 알림 유발).** Loki 쿼리 A(`sum by (app) (count_over_time({namespace=~".+"} | json | level="ERROR" [5m]))`, instant) → threshold C 직결 구조가 평가 실패. reduce 단계(B) 필요하거나 LogQL/instant 처리 문제. 시나리오 C 선행 블로커.
+  - 수정: 별도 조사 후 reduce 단계 추가 또는 쿼리 재작성. `monitoring/alerting/rules/log-error-spike.yaml`.
+
+**즉시 완화 (택1, 사용자 판단)**: rca-agent가 crashloop하며 Grafana 재시도를 계속 받는 피드백 루프 중. (a) `discord.yaml`에서 `rca-agent-webhook-receiver` 임시 제거 → PR (Discord 알림은 즉시 정상화, RCA만 중단), 또는 (b) `kubectl -n monitoring scale deploy/rca-agent --replicas=0`.
+
+**실행 남음 (버그 1·2 수정 배포 후)**
+- [ ] A(crashloop) → Discord 원본 알림 + RCA 후속 메시지 / delete
+- [ ] B(oomkill) / C(log-error-spike, 버그 3도 수정돼야 함) / D(pvc-usage, 느림) → 동일
+- [ ] `kubectl delete ns rca-test`, 결과 STATE 반영
+
+**부수 확인**: `파드 OOMKilled` 규칙 `NoData`(정상), `PVC 사용률` `Normal`(정상), argocd applicationset-controller CrashLoop은 `.harness/BACKLOG.md`.
 
 **산출물 `test/rca-scenarios/phase2/` (작성 완료)**
 - [x] `namespace.yaml` — `rca-test` (라벨 `rca-test: "true"`)
