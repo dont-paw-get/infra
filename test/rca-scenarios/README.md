@@ -52,12 +52,16 @@ Discord에 후속 메시지를 보내는 파이프라인을 검증한다. 배경
 
 6. Discord 채널에서 `RCA: 파드 CrashLoopBackOff` 임베드 메시지 도착 확인.
 
-### PowerShell 대안 (send-webhook.sh 없이)
+### Windows PowerShell 주의
+
+`Invoke-RestMethod -InFile`은 Windows PowerShell 5.1에서 페이로드의 한글(`파드 CrashLoopBackOff`)을
+UTF-8로 전송하지 않아 서버의 `request.json()` 파싱이 깨진다(500). **`curl.exe`를 쓸 것**
+(PowerShell의 `curl` 별칭이 아니라 `curl.exe`로 명시):
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/webhook `
-  -ContentType 'application/json' `
-  -InFile .\payloads\crashloop-firing.json -TimeoutSec 300
+curl.exe -sS -X POST http://localhost:8080/webhook `
+  -H "Content-Type: application/json" `
+  --data "@payloads/crashloop-firing.json" --max-time 300
 ```
 
 ### 예상 한계
