@@ -14,12 +14,18 @@ groups:
         for: 10m
         data:
           - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
             datasourceUid: prometheus
             model:
               expr: |
                 kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes
               instant: true
           - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
             datasourceUid: __expr__
             model:
               type: threshold

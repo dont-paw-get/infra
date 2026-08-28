@@ -16,6 +16,9 @@ groups:
         for: 5m
         data:
           - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
             datasourceUid: prometheus
             model:
               expr: |
@@ -24,6 +27,9 @@ groups:
                 sum(rate(http_server_requests_seconds_count[5m])) by (application)
               instant: true
           - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
             datasourceUid: __expr__
             model:
               type: threshold
