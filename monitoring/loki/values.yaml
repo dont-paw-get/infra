@@ -37,6 +37,11 @@ loki:
 
   compactor:
     retention_enabled: true
+    # retention_enabled가 true면 Loki가 삭제 요청을 저장할 오브젝트 스토어를 반드시 요구한다
+    # (없으면 기동 시 "CONFIG ERROR: invalid compactor config: compactor.delete-request-store
+    # should be configured when retention is enabled"로 죽는다 — 2026-08-28 실제 발생 확인).
+    # 위 loki.storage.type과 동일한 s3를 쓴다.
+    delete_request_store: s3
 
 serviceAccount:
   create: true

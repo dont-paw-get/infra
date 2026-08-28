@@ -2,6 +2,23 @@
 
 세션마다 무엇을 했는지 (append-only 서술형 로그, 최신이 위). 단계별 완료 요약은 `STATE.md`, 결정 이유는 `DECISIONS.md`/`docs/adr/` 참고.
 
+## 2026-08-28 — kube-prometheus-stack / loki Progressing 진단 세션
+
+사용자가 "kube-prometheus-stack과 loki 두 애플리케이션만 processing 상태"라고 요청. 코드 변경 없이 클러스터 진단부터 시작했다(에이전트 쪽에 kubeconfig·유효한 AWS 자격증명이 없어, 명령은 사용자가 실행하고 출력을 붙여주는 방식으로 진행).
+
+**클러스터 특정에 시간이 걸렸다.** 사용자의 kubectl 컨텍스트가 처음엔 다른 클러스터, 다음엔 `dpyb-prod`를 가리켜 `argocd`/`monitoring` 네임스페이스가 없었다. `argocd-cluster`라는 별칭 컨텍스트가 실제로는 `dpyb-prod`를 가리키고 있었던 것도 혼선 요인. 관측 스택은 `dpyb-dev`에 있다.
+
+**Loki — 두 단계 문제였다.**
+1. STS `loki`의 `volumeClaimTemplates.storageClassName`이 `gp2`로 굳어 있어 ArgoCD sync가 `Forbidden: updates to statefulset spec ...`으로 5회 재시도 후 실패. 이미 `DECISIONS.md`(2026-08-27 정정 항목)에 예고돼 있던 불변 필드 문제다. `kubectl delete statefulset loki` + `kubectl delete pvc storage-loki-0`(Pending이라 데이터 없음) 후 ArgoCD sync로 재생성 → `auto-ebs-sc`로 20Gi `Bound` 성공.
+   - sync 트리거 시 주의: hard refresh 어노테이션은 비교만 다시 할 뿐 sync를 실행하지 않는다. `argocd` CLI는 서버 주소 미설정으로 못 썼고, `kubectl -n argocd patch application loki --type merge -p '{"operation":{...}}'`로 sync를 직접 넣어 해결했다.
+2. PVC가 붙자 그동안 가려져 있던 config 오류가 드러남 — `compactor.delete-request-store should be configured when retention is enabled`. `monitoring/loki/values.yaml`에 `compactor.delete_request_store: s3` 추가로 수정하고 `helm template`로 렌더링 검증 완료. **아직 커밋/푸시 안 됨 — 병합 전까지 `loki-0`는 CrashLoopBackOff.**
+
+**Prometheus — 오퍼레이터가 CRD보다 먼저 떠서 컨트롤러를 등록하지 못한 상태였다.** 자세한 내용은 `DECISIONS.md` 2026-08-28 항목. ArgoCD sync가 27시간째 `Running`으로 매달려 새 sync를 받지 못하던 교착까지 겹쳐 있었다. 매달린 operation 제거 + `rollout restart deployment/kube-prometheus-stack-operator`로 해소 → Prometheus `RECONCILED: True`/`AVAILABLE: True`, STS가 `auto-ebs-sc`로 생성, Application `Synced`/`Healthy`.
+
+진단 과정에서 유용했던 명령: `kubectl -n argocd get application <name> -o jsonpath='{.status.operationState.phase}{.status.operationState.message}'`(교착 확인), 오퍼레이터 로그를 `grep -v "Endpoints is deprecated"`로 걸러 기동 로그 확인(3분 주기 경고에 밀려 `--tail=100`으로는 안 보인다).
+
+**다음 세션이 이어받을 것:** `monitoring/loki/values.yaml` 수정 커밋·푸시·병합(작업 트리에만 있음, 티켓 브랜치 미생성 — 사용자에게 티켓 번호 확인 필요) → ArgoCD `loki` Sync → `loki-0` Running 확인 → 그다음 IRSA(`dpgy-infra-loki` IAM Role) 실제 존재 여부 확인. `.harness/PLAN.md`의 "dev 클러스터 배포 검증" 섹션 참고. 재발 방지 항목 2건은 `BACKLOG.md`에 있다.
+
 ## 2026-08-24 — ArgoCD GitOps 전환 구현 세션
 
 - PLAN.md의 미결정 항목 중 사용자가 "ArgoCD GitOps 전환"을 선택. External Secrets Operator 백엔드는 AWS Secrets Manager로 확정(사용자 확인).

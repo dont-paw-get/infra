@@ -33,11 +33,10 @@ Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받
 
 ## dev 클러스터 배포 검증 (부트스트랩 중 실제 발견된 이슈)
 
-2026-08-27 사용자 확인: `rca-agent` 포함 대부분 Application이 `Synced`/`Healthy`. 자세한 진단 경위는 `.harness/STATE.md`/`DECISIONS.md` 참고.
+2026-08-28 사용자 확인: `loki`를 제외한 모든 Application이 `Synced`/`Healthy`. 자세한 진단 경위는 `.harness/STATE.md`/`DECISIONS.md` 참고.
 
-- [ ] 신규 Application `monitoring/argocd/storage-class.yaml`을 최초 1회 수동 적용(App-of-Apps가 아니라 flat 등록이라 git 커밋만으로는 반영 안 됨): `kubectl apply -f monitoring/argocd/storage-class.yaml`
-- [ ] 그 다음 `loki`/`kube-prometheus-stack` Hard Refresh + Sync → `kubectl get pvc -n monitoring`에서 `auto-ebs-sc`로 `Bound`되는지, `kubectl get pods -n monitoring`에서 `loki-0`/Prometheus 파드가 `Running`으로 전환되는지 확인
-- [ ] Prometheus는 StatefulSet 자체가 아직 생성된 적이 없어(`kubectl get statefulset -n monitoring`에 없음) storage-class 배포 후에도 operator가 정상적으로 STS를 만드는지 별도 확인 필요 — 안 만들어지면 `kube-prometheus-stack-operator` 파드 로그 확인
+- [ ] `monitoring/loki/values.yaml`의 `compactor.delete_request_store: s3` 수정을 `develop`에 병합한 뒤, ArgoCD `loki` Sync → `kubectl -n monitoring get pod loki-0`가 `Running 2/2`로 전환되는지 확인. 아직 병합 전이라 `loki-0`는 계속 `CrashLoopBackOff` 상태다
+- [ ] `loki-0`가 Running이 된 뒤 S3 접근이 실제로 되는지 확인 — IAM Role `arn:aws:iam::594532711953:role/dpgy-infra-loki`(IRSA) 생성 여부가 아직 검증되지 않았다. `kubectl -n monitoring logs loki-0 -c loki | grep -i "s3\|credential\|denied"`
 
 ## 서비스 저장소 연동
 

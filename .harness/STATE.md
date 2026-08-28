@@ -76,3 +76,6 @@
   - 원인: 클러스터가 EKS Auto Mode인데 default StorageClass가 없고, `gp2`(in-tree `kubernetes.io/aws-ebs`) 하나만 존재(`kubectl get storageclass`로 확인). 두 values.yaml 모두 storageClass를 명시하지 않아 PVC가 바인딩 안 됨
   - 수정: `monitoring/loki/values.yaml`의 `singleBinary.persistence.storageClass: gp2`, `monitoring/kube-prometheus-stack/values.yaml`의 `prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName: gp2` 추가. Loki 차트(grafana/loki 저장소, `helm-loki-7.3.0` 태그) 템플릿 소스로 필드명이 `persistence.storageClass`(chart) → `storageClassName`(렌더링된 PVC)로 매핑됨을 확인. YAML 문법 검증 완료(이 세션에 Helm CLI 없어 `helm template` 재검증은 미실행)
   - 배포 후 확인 필요: ArgoCD `loki`/`kube-prometheus-stack` Sync 후 `loki-0`/Prometheus 파드가 PVC 바인딩되어 Running으로 전환되는지 확인 — `.harness/PLAN.md` 참고
+- [x] Loki/Prometheus PVC를 `auto-ebs-sc`로 실제 Bound 완료 (2026-08-28) — `storage-class` Application 등록 후 Loki STS(`volumeClaimTemplates` 불변)를 수동 삭제·재생성해 `storage-loki-0`가 20Gi로 `Bound`. Prometheus STS도 `auto-ebs-sc`로 정상 생성
+- [x] kube-prometheus-stack `Synced`/`Healthy` 전환 (2026-08-28) — 오퍼레이터가 CRD보다 먼저 기동해 Prometheus 컨트롤러를 등록하지 못한 상태였음(자가 회복 안 됨). 매달린 ArgoCD operation 제거 + 오퍼레이터 재시작으로 해소, 경위는 `.harness/DECISIONS.md` 참고
+- [x] Loki compactor `delete_request_store: s3` 설정 누락 수정 (2026-08-28) — retention 활성 시 필수 필드, `helm template`로 렌더링 검증 완료. 경위는 `.harness/DECISIONS.md` 참고

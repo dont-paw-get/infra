@@ -2,6 +2,34 @@
 
 `docs/adr/`에 없는 소규모/운영 결정의 역사 (append-only, 최신이 위). 아키텍처 수준 결정(스택 선정, 호스팅 방식 등)은 여기가 아니라 `docs/adr/`에 기록한다.
 
+## 2026-08-28 — Loki compactor에 `delete_request_store: s3` 추가
+
+StorageClass 문제가 풀려 `loki-0`가 처음으로 스케줄된 직후, config 검증 단계에서 죽었다: `CONFIG ERROR: invalid compactor config: compactor.delete-request-store should be configured when retention is enabled`. Loki 3.x는 `compactor.retention_enabled: true`를 켜면 삭제 요청을 보관할 오브젝트 스토어를 반드시 함께 요구한다. 그동안 PVC가 Pending이라 파드가 기동조차 못 해 이 오류가 드러나지 않았을 뿐, 처음부터 있던 설정 누락이다.
+
+**결정:** `loki.storage.type`과 동일한 `s3`를 `loki.compactor.delete_request_store`로 지정한다. 이미 `dpgy-infra-loki-logs` 버킷을 chunks/ruler/admin에 함께 쓰고 있으므로 별도 버킷을 만들지 않는다.
+
+`helm template loki grafana/loki --version 7.3.0 -f monitoring/loki/values.yaml`로 렌더링된 config에 `compactor.delete_request_store: s3`와 `limits_config.retention_period: 336h`가 함께 들어가는 것을 확인했다.
+
+**영향받은 파일:** `monitoring/loki/values.yaml`.
+
+## 2026-08-28 — prometheus-operator가 CRD보다 먼저 기동하면 자가 회복하지 않는다
+
+Prometheus CR이 27시간 동안 status가 통째로 비어 있었고(`READY`/`RECONCILED`/`AVAILABLE` 공란, `Events: <none>`) StatefulSet이 생성되지 않았다. 오퍼레이터 기동 로그 첫 부분에 원인이 있었다:
+
+```
+2026-08-26T18:40:10 level=warn msg="resource \"prometheuses\" (group: \"monitoring.coreos.com/v1\") not installed in the cluster"
+```
+
+prometheus-operator는 **기동 시점에 한 번만** CRD 존재 여부를 확인하고, 없으면 해당 컨트롤러를 아예 등록하지 않은 채 계속 실행된다. 나중에 CRD가 설치돼도 재확인하지 않는다. kube-prometheus-stack Application 하나가 CRD와 오퍼레이터 Deployment를 같은 sync에 적용하므로, 오퍼레이터 파드가 CRD 등록보다 먼저 뜨면 이 상태에 빠진다. 버전 불일치가 아님도 확인했다 — CRD 어노테이션 `operator.prometheus.io/version: 0.93.1` = 오퍼레이터 이미지 `v0.93.1`, 네임스페이스 필터도 비어 있음(전체 watch).
+
+여기에 ArgoCD 교착이 겹쳐 있었다. sync operation이 `waiting for healthy state of monitoring.coreos.com/Prometheus/...`에서 27시간째 `Running`으로 매달려 있었고, ArgoCD는 진행 중인 operation이 있으면 새 sync를 받지 않는다(`kubectl patch`가 `patched (no change)`로 무시됨). 그래서 `auto-ebs-sc` 커밋이 CR에 영원히 반영되지 않았다 — Prometheus는 오퍼레이터 없이 Healthy가 될 수 없고, 오퍼레이터는 sync 없이 살아나지 않는 상호 대기.
+
+**해법(운영 조치):** 매달린 operation을 제거(`kubectl -n argocd patch application kube-prometheus-stack --type json -p '[{"op":"remove","path":"/operation"}]'`)하고 새 sync를 건 뒤, `kubectl -n monitoring rollout restart deployment/kube-prometheus-stack-operator`로 오퍼레이터를 재시작한다. 재시작 즉시 컨트롤러가 등록되고(`successfully synced all caches`, `sync prometheus key=monitoring/kube-prometheus-stack-prometheus`) STS가 `auto-ebs-sc`로 생성되면서 매달려 있던 sync까지 함께 완료됐다.
+
+**재발 방지책은 아직 미적용** — CRD를 별도 Application으로 분리하거나 sync-wave를 나누는 안을 `.harness/BACKLOG.md`에 남겼다.
+
+**영향받은 파일:** 없음(운영 조치).
+
 ## 2026-08-27 (정정) — Loki/Prometheus PVC StorageClass를 `gp2`에서 `auto-ebs-sc`로 재전환
 
 바로 아래 항목("`gp2`로 유지")은 잘못된 결정이었다. 실제로 `gp2`(레거시 in-tree `kubernetes.io/aws-ebs`)로 배포해보니, PVC가 `Pending`에서 `ExternalProvisioning: Waiting for a volume to be created by the external provisioner 'ebs.csi.aws.com'` 이벤트로 멈췄다. Kubernetes 1.23+의 CSI 마이그레이션 때문에 in-tree `gp2` 요청이 실제로는 표준 AWS EBS CSI 드라이버(`ebs.csi.aws.com`, self-managed 애드온)로 넘어가는데, 이 클러스터(EKS Auto Mode)는 그 애드온 대신 Auto Mode 전용 드라이버(`ebs.csi.eks.amazonaws.com`)만 실행 중이라 요청이 영원히 처리되지 않는다.
