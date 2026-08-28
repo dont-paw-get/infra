@@ -31,6 +31,7 @@ monitoring/
   rca-agent/                    이상탐지/RCA Agent (Strands SDK + Bedrock) 소스 + Dockerfile + K8s manifest
 secrets/README.md               시크릿 관리 정책 (실제 시크릿은 커밋하지 않음)
 scripts/install.sh              최초 부트스트랩 스크립트 (네임스페이스 + ArgoCD Application 등록)
+test/rca-scenarios/             RCA Agent 검증용 합성 webhook 페이로드 + 실행 스크립트 (수동, ArgoCD 대상 아님)
 ```
 
 ## 빠른 시작
