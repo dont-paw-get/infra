@@ -1,13 +1,13 @@
-# Grafana Alerting provisioning: Discord contact point
+# Grafana Alerting provisioning: contact points
 # 배포 시 grafana sidecar(provisioning) 또는 grafana ConfigMap으로 마운트한다.
 # 실제 웹훅 URL은 여기 두지 않는다 — secrets/README.md 참고 (ExternalSecret → grafana 파드 env var 주입).
 # $__env{}는 Grafana 자체의 provisioning 파일 환경변수 확장 문법이다 (셸 envsubst가 아님).
 #
-# RCA Agent용 webhook receiver는 임시 제거된 상태다 (2026-08-29).
-# 같은 contact point에 두면 Grafana가 두 receiver를 한 묶음으로 처리해서, rca-agent 전송이 실패할 때
-# receiver 전체 notify가 실패로 처리되어 Discord 알림까지 중복 재시도되고 결국 드롭됐다
-# (ADR-0002 결정 #3의 "두 경로 독립"이 실제로는 성립하지 않았음 — .harness/DECISIONS.md 2026-08-29 참고).
-# 별도 contact point + notification policy의 continue 라우팅으로 재도입 예정 — .harness/PLAN.md 참고.
+# discord-webhook(사람이 보는 알림)과 rca-agent-webhook(RCA 트리거)을 **별도 contact point로 분리**한다.
+# Grafana는 contact point 단위로 notify 성공/실패를 판정하므로, 한 contact point에 두 receiver를 두면
+# rca-agent 전송 실패가 Discord 알림의 중복 재시도·드롭으로 번진다 (2026-08-29 실제 발생).
+# ADR-0002 결정 #3의 "두 경로 독립"은 이렇게 분리해야 실제로 성립한다 — .harness/DECISIONS.md 참고.
+# 두 contact point 모두로 알림을 보내는 것은 notification-policy.yaml의 continue 라우팅이 담당한다.
 apiVersion: 1
 
 contactPoints:
@@ -20,3 +20,15 @@ contactPoints:
           url: "$__env{DISCORD_WEBHOOK_URL}"
           use_discord_username: false
         disableResolveMessage: false
+
+  # rca-agent Service는 monitoring/rca-agent/k8s/service.yaml, 클러스터 내부 통신이라 별도 인증 없음.
+  # 해소(resolved) 알림으로는 RCA를 돌릴 필요가 없어 disableResolveMessage: true.
+  - orgId: 1
+    name: rca-agent-webhook
+    receivers:
+      - uid: rca-agent-webhook-receiver
+        type: webhook
+        settings:
+          url: "http://rca-agent.monitoring.svc.cluster.local:8080/webhook"
+          httpMethod: POST
+        disableResolveMessage: true
