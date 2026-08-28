@@ -40,8 +40,8 @@
 
 - `monitoring/rca-agent/`에 Agent 소스(FastAPI webhook 서버 + Strands SDK Agent + Discord 알림), Dockerfile, K8s manifest(Kustomize)가 추가되었다. `monitoring/argocd/rca-agent.yaml`로 배포된다.
 - Grafana Alerting의 webhook 통합은 기존 `discord-webhook` contact point에 `rca-agent-webhook-receiver`를 추가하는 방식으로 구성했다(`monitoring/alerting/contact-points/discord.yaml`).
-- IRSA `ServiceAccount`(`rca-agent-irsa`) + IAM Role(`dpgy-infra-rca-agent`) 생성 완료(2026-08-25, AWS Console). 신뢰 정책은 `sub: system:serviceaccount:monitoring:rca-agent-irsa`로 좁혔고, 권한은 `bedrock:InvokeModel(WithResponseStream)`을 `foundation-model/anthropic.claude-sonnet-5`로 스코프했다.
-- Bedrock 모델은 **anthropic.claude-sonnet-5**로 확정(`monitoring/rca-agent/k8s/configmap.yaml`의 `BEDROCK_MODEL_ID`). Bedrock 콘솔의 모델 액세스(Model access) 승인은 별도 확인 필요.
+- IRSA `ServiceAccount`(`rca-agent-irsa`) + IAM Role(`dpgy-infra-rca-agent`) 생성 완료(2026-08-25, AWS Console). 신뢰 정책은 `sub: system:serviceaccount:monitoring:rca-agent-irsa`로 좁혔다. 권한은 처음 `foundation-model/anthropic.claude-sonnet-5`로 스코프했으나, 2026-08-28 실제 호출에서 Sonnet 5가 베어 모델 ID on-demand 호출을 거부(`ValidationException`)해 **inference profile 방식으로 전환**했다 — `bedrock:InvokeModel(WithResponseStream)`을 `inference-profile/global.anthropic.claude-sonnet-5`와 라우팅 대상 `arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5`로 스코프.
+- Bedrock 모델 ID는 **inference profile `global.anthropic.claude-sonnet-5`**(`monitoring/rca-agent/k8s/configmap.yaml`의 `BEDROCK_MODEL_ID`). `ap-northeast-2`에 `apac.` 프로파일이 없어 `global.`(전 리전 라우팅) 하나뿐이다. 경위는 `.harness/DECISIONS.md` 2026-08-28 항목 참고.
 - Agent는 클러스터 쓰기 권한이 없으므로, 자동 조치가 필요한 경우는 이번 범위에서 제외되며 향후 별도 ADR로 재검토한다.
 
 ## 미결정 (추후 논의 필요)

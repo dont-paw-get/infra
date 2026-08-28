@@ -69,7 +69,7 @@ Grafana Alerting 발화(webhook)를 받아 Bedrock 기반으로 원인을 분석
 - `src/`: FastAPI 서버(`main.py`, `/webhook`)가 Grafana 알림을 받아 `analyzer.py`(Strands SDK `Agent` + Bedrock + Prometheus/Loki 쿼리 tool)를 호출하고, 결과를 `notifier.py`가 Discord webhook으로 전송. system prompt가 알림 5종별 라벨/조사 순서를 안내하고, `query_prometheus`(instant)/`query_prometheus_range`(추세)/`query_loki` 3개 tool을 제공한다. 각 tool은 실패해도 예외를 던지지 않고 실패 문자열을 반환(부분 실패 허용), 응답은 8000자로 truncate. k8s 이벤트/describe pod 조회는 RBAC 확장이 필요해 아직 없음(`.harness/PLAN.md` 백로그).
 - 배포: `monitoring/rca-agent/k8s/`(Kustomize) — IRSA `ServiceAccount`(`rca-agent-irsa`), `ConfigMap`(Bedrock 리전/모델, Prometheus/Loki 엔드포인트), `Deployment`(image는 ECR placeholder), `Service`(`rca-agent:8080`). `monitoring/argocd/rca-agent.yaml`(sync-wave 0)로 동기화.
 - Prometheus/Loki는 Alloy와 동일하게 클러스터 내부 서비스 DNS(`prometheus-operated`, `loki-gateway`)로 별도 인증 없이 접근.
-- Bedrock 인증은 IRSA(`arn:aws:iam::594532711953:role/dpgy-infra-rca-agent`, 생성 완료 — 권한은 `foundation-model/anthropic.claude-sonnet-5`로 스코프). 모델은 `anthropic.claude-sonnet-5`로 확정.
+- Bedrock 인증은 IRSA(`arn:aws:iam::594532711953:role/dpgy-infra-rca-agent`). 모델 ID는 **inference profile** `global.anthropic.claude-sonnet-5`(`configmap.yaml`의 `BEDROCK_MODEL_ID`) — Sonnet 5는 베어 모델 ID로 on-demand 호출이 안 되고 `ap-northeast-2`엔 `apac.` 프로파일이 없어 `global.` 하나뿐이다(2026-08-28 실제 발생). IAM 권한은 `bedrock:InvokeModel*`를 `inference-profile/global.anthropic.claude-sonnet-5`와 `arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5`(라우팅 대상)로 스코프.
 - 클러스터 쓰기 권한 없음 (read-only 분석/보고 전용).
 
 ## CI (GitHub Actions)
