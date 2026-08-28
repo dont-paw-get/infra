@@ -1,0 +1,70 @@
+# 시나리오 D — PVC 사용률 초과
+#
+# 1Gi PVC를 만들고 Job이 dd로 ~900MiB 채운 뒤 볼륨을 마운트한 채 대기(sleep).
+# kubelet은 볼륨이 마운트된 동안에만 volume stats를 보고하므로 파드가 살아있어야 한다.
+# 알림: monitoring/alerting/rules/pvc-usage.yaml  "PVC 사용률 초과"  (for 10m, rule interval 5m)
+#   expr: kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes > 0.85
+#   라벨: namespace=rca-test, persistentvolumeclaim=rca-test-fill
+#   주의: 이 expr에는 네임스페이스 필터가 없어 클러스터 전체 PVC가 대상이다.
+# 기대: apply 후 발화까지 15-20분 (느림). Discord 원본 알림 + "RCA: PVC 사용률 초과"
+# dd가 "No space left on device"로 실패하면 count 를 850 → 800 으로 낮춰 재시도.
+#
+# 정리: kubectl delete -f test/rca-scenarios/phase2/D-pvc-usage.yaml
+#   (Job/파드가 사라지며 PVC도 삭제 → auto-ebs-sc 는 reclaimPolicy Delete 라 EBS 볼륨까지 삭제)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rca-test-fill
+  namespace: rca-test
+  labels:
+    rca-test: "true"
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: auto-ebs-sc
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rca-test-pvc-filler
+  namespace: rca-test
+  labels:
+    rca-test: "true"
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: rca-test-pvc-filler
+        app.kubernetes.io/name: rca-test-pvc-filler
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: fill
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              dd if=/dev/zero of=/data/fill bs=1M count=900
+              echo '{"level":"ERROR","msg":"disk almost full after fill"}'
+              df -h /data
+              echo "holding volume mounted so kubelet keeps reporting volume stats"
+              sleep 3600
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: rca-test-fill
