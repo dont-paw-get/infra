@@ -1,0 +1,8 @@
+# Phase 2 장애 주입 테스트 전용 네임스페이스. 최초 1회만 apply.
+# 정리: kubectl delete ns rca-test  (하위 워크로드·PVC·EBS 볼륨까지 함께 삭제됨)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rca-test
+  labels:
+    rca-test: "true"

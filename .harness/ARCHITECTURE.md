@@ -55,7 +55,9 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 - Notification policy: 전체 알림을 `discord-webhook`으로 라우팅 (`monitoring/alerting/policies/notification-policy.yaml`).
 - Rules 5종 파일 존재(`monitoring/alerting/rules/`): HTTP 5xx 에러율, p99 레이턴시, CrashLoopBackOff/OOMKilled, PVC 사용률, 로그 ERROR 급증. threshold는 모두 임시값.
 - 이 중 **HTTP 5xx 에러율/p99 레이턴시(app-level, Micrometer 메트릭 의존)는 서비스 저장소 계측 전까지 배포 제외** — `monitoring/alerting/kustomization.yaml`의 `configMapGenerator`에서 뺐다(파일은 남아있음). 나머지 3종(파드 생존/자원, 로그)만 실제 배포됨. 계측 완료 후 재추가 조건은 `.harness/PLAN.md`의 "서비스 저장소 연동" 참고.
-- provisioning 배포 메커니즘: `monitoring/alerting/kustomization.yaml`(`configMapGenerator`)이 각 YAML을 `grafana_alert=1` 라벨의 ConfigMap으로 만들고, ArgoCD(`monitoring/argocd/alerting.yaml`)가 이를 동기화 → Grafana sidecar가 읽어감.
+- 각 규칙의 `data[]` 쿼리에는 `relativeTimeRange`(from>to)가 반드시 있어야 한다. 없으면 Grafana가 `[From: 0s, To: 0s]`로 간주해 `alerting.alert-rule.invalidRelativeTime`으로 프로비저닝 reload 전체(POST `/api/admin/provisioning/alerting/reload` → 500)를 거부한다 — contact point/notification policy만 로드되고 규칙은 0개가 된다(2026-08-29 실제 발생, `.harness/DECISIONS.md` 참고). instant 쿼리든 `__expr__`든 `from: 600, to: 0`을 둔다.
+- provisioning 배포 메커니즘: `monitoring/alerting/kustomization.yaml`(`configMapGenerator`)이 각 YAML을 `grafana_alert=1` 라벨의 ConfigMap으로 만들고, ArgoCD(`monitoring/argocd/alerting.yaml`)가 이를 동기화 → Grafana sidecar(`grafana-sc-alerts` 컨테이너)가 `/etc/grafana/provisioning/alerting/`에 쓰고 Grafana가 reload API를 호출한다.
+- 규칙이 실제 로드됐는지 확인: `curl -u admin:<pw> localhost:3000/api/v1/provisioning/alert-rules`(포트포워드 후) 가 `[]`가 아니어야 한다. Grafana 컨테이너 로그의 `logger=provisioning.alerting`/`errorMessageID=alerting.*`도 확인.
 
 ## 시크릿
 

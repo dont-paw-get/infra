@@ -13,12 +13,18 @@ groups:
         for: 2m
         data:
           - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
             datasourceUid: prometheus
             model:
               expr: |
                 kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} == 1
               instant: true
           - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
             datasourceUid: __expr__
             model:
               type: threshold
@@ -40,12 +46,18 @@ groups:
         for: 0m
         data:
           - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
             datasourceUid: prometheus
             model:
               expr: |
                 kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
               instant: true
           - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
             datasourceUid: __expr__
             model:
               type: threshold

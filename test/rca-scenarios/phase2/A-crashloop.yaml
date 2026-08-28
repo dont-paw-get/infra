@@ -1,0 +1,46 @@
+# 시나리오 A — 파드 CrashLoopBackOff
+#
+# busybox가 10초 뒤 non-zero exit → kubelet이 반복 재시작하다 backoff.
+# 알림: monitoring/alerting/rules/pod-health.yaml  "파드 CrashLoopBackOff"  (for 2m)
+#   expr: kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} == 1
+#   라벨: namespace=rca-test, pod=<파드명>, container=app
+# 기대: apply 후 ~2-3분이면 발화 → Discord 원본 알림 + "RCA: 파드 CrashLoopBackOff"
+#
+# 정리: kubectl delete -f test/rca-scenarios/phase2/A-crashloop.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rca-test-crashloop
+  namespace: rca-test
+  labels:
+    rca-test: "true"
+    app: rca-test-crashloop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rca-test-crashloop
+  template:
+    metadata:
+      labels:
+        app: rca-test-crashloop
+        app.kubernetes.io/name: rca-test-crashloop
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo '{"level":"INFO","msg":"starting up"}'
+              sleep 10
+              echo '{"level":"ERROR","msg":"fatal: simulated crash, exiting non-zero"}'
+              exit 1
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi

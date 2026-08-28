@@ -2,6 +2,34 @@
 
 세션마다 무엇을 했는지 (append-only 서술형 로그, 최신이 위). 단계별 완료 요약은 `STATE.md`, 결정 이유는 `DECISIONS.md`/`docs/adr/` 참고.
 
+## 2026-08-29 — Phase 2 시작, 알림 규칙 미로드 발견 (CLIAR-159)
+
+사용자가 "병합 없이 Phase 2 실행 가능하면 해봐"라고 요청. `test/rca-scenarios/phase2/`는 ArgoCD 대상이 아니라 로컬 작업 트리에서 바로 `kubectl apply` 가능 — Claude가 사용자 머신의 kubeconfig(`--profile mfa`, dpyb-dev)로 직접 실행했다.
+
+시나리오 A(`A-crashloop.yaml`) 배포 → 파드가 CrashLoopBackOff 진입, `kube_pod_container_status_waiting_reason{namespace="rca-test", reason="CrashLoopBackOff"}=1`까지 Prometheus로 확인. 그런데 10분 넘게 기다려도 RCA Agent 로그에 `POST /webhook`이 없었다(로그는 kubelet probe의 `GET /healthz`만).
+
+**원인: Grafana에 알림 규칙이 0개 로드돼 있었다.** `/api/v1/provisioning/alert-rules` → `[]`. Grafana 컨테이너 로그에 `errorMessageID=alerting.alert-rule.invalidRelativeTime`, `error="Invalid alert rule query A: invalid relative time range [From: 0s, To: 0s]"`, `POST /api/admin/provisioning/alerting/reload status=500`. `monitoring/alerting/rules/*.yaml`의 `data[]`에 `relativeTimeRange`가 없어서 Grafana가 프로비저닝 reload 배치 전체를 거부 — contact point(`discord.yaml`)와 notification policy만 로드되고 규칙 3종은 전부 누락. sidecar(`grafana-sc-alerts` 컨테이너, 이름에 s 있음)는 파일을 `/etc/grafana/provisioning/alerting/`에 정상적으로 쓰고 있었고, 데이터소스 uid(`prometheus`/`loki`)도 정상. **저장소 배포 이후 알림이 한 번도 동작한 적 없다.**
+
+**수정:** `monitoring/alerting/rules/` 5개 파일 모두 `refId: A`와 `refId: C`에 `relativeTimeRange: {from: 600, to: 0}` 추가. `kubectl kustomize monitoring/alerting/`로 렌더링에 8개 들어가는 것 확인(배포 대상 pod-health 4 + pvc 2 + log 2). **아직 커밋 안 함.** `kubectl apply`로 라이브 검증은 auto-mode classifier가 차단(git 앞서는 클러스터 변경) — 병합 후 검증해야 한다.
+
+시나리오 A 워크로드와 `rca-test` 네임스페이스는 정리 완료.
+
+**다음 세션이 이어받을 것:** (1) `monitoring/alerting/rules/*.yaml` `relativeTimeRange` 수정 커밋 → PR → `develop` 병합 → ArgoCD `alerting` sync → 포트포워드 후 `curl -u admin:<pw> localhost:3000/api/v1/provisioning/alert-rules`로 규칙 로드 확인 + Grafana 로그 reload 500 사라짐 확인. admin 비번은 `kubectl -n monitoring get secret grafana-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d`. (2) 그 다음 `test/rca-scenarios/phase2/`의 A→B→C→D를 하나씩 실행하며 Discord에 원본 알림 + RCA 후속 메시지 확인. 상세 절차는 `test/rca-scenarios/phase2/README.md`. 미커밋 변경: `.harness/*` 4개 + `monitoring/alerting/rules/*` 5개.
+
+## 2026-08-28 — RCA Agent Phase 1 스모크 테스트 (CLIAR-159)
+
+사용자가 "모니터링 배포 완료, 장애 시나리오로 RCA Agent 테스트하고 싶다"고 요청. 가장 안전한 방법으로 좁혀, 실제 장애 워크로드 없이 합성 Grafana webhook 페이로드를 `rca-agent`의 `/webhook`에 직접 POST하는 Phase 1 스모크 테스트를 만들었다. 산출물: `test/rca-scenarios/` (`payloads/crashloop-firing.json`, `payloads/resolved.json`, `send-webhook.sh`, `README.md`) — ArgoCD/CI 대상 아님(수동).
+
+**로컬 kubectl 접근 세팅에 시간이 걸렸다.** 사용자가 그동안 CloudShell에서만 클러스터를 만졌음. IAM 사용자 `kosa12`에 `kosa-edu-mfa-pol`(MFA 없으면 전부 deny) 정책이 걸려 있고 기존 MFA는 U2F 패스키뿐이라 CLI `get-session-token`을 못 썼다. 사용자가 콘솔에서 TOTP 인증앱 MFA(`arn:.../mfa/otp-cli`)를 추가 → `aws sts get-session-token`으로 12h 임시 자격증명 발급 → `--profile mfa`에 저장 → `aws eks update-kubeconfig --profile mfa`로 해결. (세션 만료 시 `get-session-token` + `aws configure set ... --profile mfa` 3줄 재실행)
+
+**첫 테스트에서 실제 버그 발견.** webhook→`analyze()`→Strands→Bedrock `ConverseStream`까지 도달(IRSA·권한 정상)한 뒤 `ValidationException: Invocation of model ID anthropic.claude-sonnet-5 with on-demand throughput isn't supported. Retry ... with an inference profile`. Sonnet 5는 베어 모델 ID on-demand 불가. `aws bedrock list-inference-profiles --region ap-northeast-2` → Sonnet 5용은 `global.anthropic.claude-sonnet-5` 하나뿐(`apac.` 없음). `configmap.yaml`의 `BEDROCK_MODEL_ID`를 그걸로 바꾸고, IAM Role `dpgy-infra-rca-agent` 정책을 `inference-profile/global.anthropic.claude-sonnet-5` + `arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5`로 확장(사용자가 콘솔에서). 경위는 `DECISIONS.md` 2026-08-28 항목.
+
+**커밋 2개(`feat` 테스트 시나리오, `fix` 모델 ID)를 CLIAR-159 브랜치에 만들고 사용자가 PR #4로 develop 병합.** CI가 이미지 재빌드 + `kustomization.yaml` 태그 갱신(`f36c680`) → ArgoCD `rca-agent` Synced/Healthy, 새 파드가 `global.anthropic.claude-sonnet-5`로 기동. 재테스트 → **Discord에 `RCA: 파드 CrashLoopBackOff` 임베드 정상 도착, 파이프라인 전 구간 확인.** `rca-test` 네임스페이스가 실재하지 않아 도구 쿼리는 빈 결과지만 Agent가 스모크 테스트임을 스스로 인지하고 합리적 보고서 작성.
+
+부수 확인: (1) `resolved` 페이로드의 500은 Windows PowerShell `Invoke-RestMethod -InFile`이 한글을 UTF-8로 안 보낸 탓 — `curl.exe`로는 정상. README에 반영. (2) `analyze()` 예외가 `/webhook` 500으로만 나오고 Discord 통지가 없음 — RCA 실패 가시성 부재, `PLAN.md`에 후속 항목으로.
+
+**다음 세션이 이어받을 것:** `.harness/PLAN.md`의 "RCA Agent 테스트 — Phase 2"(실제 장애 주입 E2E, 별도 컨펌 필요) + "RCA 실패 가시성" 후속 항목. `test/rca-scenarios/send-webhook.sh`는 CRLF로 커밋됨(Windows) — Linux에서 실행 시 주의, 필요하면 `.gitattributes` 검토.
+
 ## 2026-08-28 — kube-prometheus-stack / loki Progressing 진단 세션
 
 사용자가 "kube-prometheus-stack과 loki 두 애플리케이션만 processing 상태"라고 요청. 코드 변경 없이 클러스터 진단부터 시작했다(에이전트 쪽에 kubeconfig·유효한 AWS 자격증명이 없어, 명령은 사용자가 실행하고 출력을 붙여주는 방식으로 진행).

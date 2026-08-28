@@ -15,12 +15,18 @@ groups:
         for: 5m
         data:
           - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
             datasourceUid: loki
             model:
               expr: |
                 sum by (app) (count_over_time({namespace=~".+"} | json | level="ERROR" [5m]))
               instant: true
           - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
             datasourceUid: __expr__
             model:
               type: threshold

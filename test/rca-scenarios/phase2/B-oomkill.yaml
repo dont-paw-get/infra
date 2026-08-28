@@ -1,0 +1,43 @@
+# 시나리오 B — 파드 OOMKilled
+#
+# busybox `tail /dev/zero`가 개행을 찾느라 무한히 메모리를 버퍼링 → 32Mi limit 초과로 OOMKill.
+# 알림: monitoring/alerting/rules/pod-health.yaml  "파드 OOMKilled"  (for 0m)
+#   expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+#   라벨: namespace=rca-test, pod=<파드명>, container=app
+# 참고: 반복 OOMKill로 "파드 CrashLoopBackOff" 알림도 함께 뜰 수 있음 → RCA 분석이 2회 실행될 수 있다.
+# 기대: apply 후 1-2분이면 발화 → Discord 원본 알림 + "RCA: 파드 OOMKilled"
+#
+# 정리: kubectl delete -f test/rca-scenarios/phase2/B-oomkill.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rca-test-oomkill
+  namespace: rca-test
+  labels:
+    rca-test: "true"
+    app: rca-test-oomkill
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rca-test-oomkill
+  template:
+    metadata:
+      labels:
+        app: rca-test-oomkill
+        app.kubernetes.io/name: rca-test-oomkill
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo '{"level":"INFO","msg":"allocating memory until OOM"}'
+              tail /dev/zero
+          resources:
+            requests:
+              memory: 32Mi
+            limits:
+              memory: 32Mi
