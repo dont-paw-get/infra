@@ -1,0 +1,43 @@
+{
+  "receiver": "discord-webhook",
+  "status": "resolved",
+  "orgId": 1,
+  "alerts": [
+    {
+      "status": "resolved",
+      "labels": {
+        "alertname": "파드 CrashLoopBackOff",
+        "grafana_folder": "Cluster Alerts",
+        "namespace": "rca-test",
+        "pod": "rca-test-crashloop-6d4f7c9b8-abcde",
+        "container": "app",
+        "severity": "critical"
+      },
+      "annotations": {
+        "summary": "rca-test/rca-test-crashloop-6d4f7c9b8-abcde 파드가 CrashLoopBackOff 상태입니다"
+      },
+      "startsAt": "2026-08-28T09:00:00Z",
+      "endsAt": "2026-08-28T09:20:00Z",
+      "generatorURL": "",
+      "fingerprint": "smoke-test-crashloop-0001",
+      "valueString": "[ var='A' labels={__name__=kube_pod_container_status_waiting_reason, namespace=rca-test, pod=rca-test-crashloop-6d4f7c9b8-abcde, reason=CrashLoopBackOff} value=0 ]"
+    }
+  ],
+  "groupLabels": {
+    "alertname": "파드 CrashLoopBackOff",
+    "namespace": "rca-test"
+  },
+  "commonLabels": {
+    "alertname": "파드 CrashLoopBackOff",
+    "namespace": "rca-test",
+    "severity": "critical"
+  },
+  "commonAnnotations": {},
+  "externalURL": "",
+  "version": "1",
+  "groupKey": "{}/{alertname=\"파드 CrashLoopBackOff\"}:{namespace=\"rca-test\"}",
+  "truncatedAlerts": 0,
+  "title": "[RESOLVED] 파드 CrashLoopBackOff (rca-test)",
+  "state": "ok",
+  "message": "**Resolved**"
+}

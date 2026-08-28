@@ -2,6 +2,27 @@
 
 `docs/adr/`에 없는 소규모/운영 결정의 역사 (append-only, 최신이 위). 아키텍처 수준 결정(스택 선정, 호스팅 방식 등)은 여기가 아니라 `docs/adr/`에 기록한다.
 
+## 2026-08-28 — RCA Agent의 Bedrock 모델 ID를 inference profile로 전환
+
+Phase 1 스모크 테스트(합성 webhook)에서 `analyze()`가 Bedrock `ConverseStream` 호출까지 도달한 뒤 죽었다:
+
+```
+ValidationException: Invocation of model ID anthropic.claude-sonnet-5 with on-demand throughput
+isn't supported. Retry your request with the ID or ARN of an inference profile that contains this model.
+```
+
+Claude Sonnet 5는 Bedrock에서 베어 foundation-model ID로 on-demand 호출이 불가능하고 cross-region inference profile을 요구한다. `aws bedrock list-inference-profiles --region ap-northeast-2` 결과 Sonnet 5용 프로파일은 `global.anthropic.claude-sonnet-5` 하나뿐(`apac.` 없음)이었다.
+
+**결정:**
+- `monitoring/rca-agent/k8s/configmap.yaml`의 `BEDROCK_MODEL_ID`를 `anthropic.claude-sonnet-5` → `global.anthropic.claude-sonnet-5`.
+- IAM Role `dpgy-infra-rca-agent` 정책을 `bedrock:InvokeModel(WithResponseStream)` on `inference-profile/global.anthropic.claude-sonnet-5` + `arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5`(profile이 라우팅하는 실제 모델)로 확장 — profile ARN만으로는 부족하고 대상 FM 권한도 필요하다. `global.` 프로파일은 리전 범위가 넓어 ARN 리전을 `*`로 둔다. (사용자가 AWS Console에서 적용, 2026-08-28)
+
+`global.`은 전 리전 라우팅이라 데이터가 `ap-northeast-2` 밖으로 나갈 수 있으나, `ap-northeast-2`에 리전 한정 프로파일이 없어 대안이 없다.
+
+부수 확인: 이 예외가 FastAPI 핸들러(`main.py`의 `webhook`)까지 전파돼 `/webhook`이 500을 반환했다 — `analyze()` 실패를 삼키고 부분 보고하는 처리가 없다(ADR-0002 "미결정: Agent 장애/타임아웃 시 정책"과 연결, `.harness/PLAN.md` 백로그).
+
+**영향받은 파일:** `monitoring/rca-agent/k8s/configmap.yaml`. (IAM은 콘솔 — 저장소 밖)
+
 ## 2026-08-28 — Loki compactor에 `delete_request_store: s3` 추가
 
 StorageClass 문제가 풀려 `loki-0`가 처음으로 스케줄된 직후, config 검증 단계에서 죽었다: `CONFIG ERROR: invalid compactor config: compactor.delete-request-store should be configured when retention is enabled`. Loki 3.x는 `compactor.retention_enabled: true`를 켜면 삭제 요청을 보관할 오브젝트 스토어를 반드시 함께 요구한다. 그동안 PVC가 Pending이라 파드가 기동조차 못 해 이 오류가 드러나지 않았을 뿐, 처음부터 있던 설정 누락이다.
