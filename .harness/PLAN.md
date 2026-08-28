@@ -31,10 +31,22 @@ Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받
 - [ ] (백로그) k8s 이벤트/describe pod 조회 tool 추가 — CrashLoopBackOff/OOMKilled 원인(재시작 사유, 리소스 limit 초과 등) 파악에 유용하나, `rca-agent-irsa` ServiceAccount에 새 Kubernetes RBAC(get/list pods, events) 부여가 필요해 별도 논의 후 진행. 현재는 Prometheus/Loki만 조회하는 순수 read 권한만 있음
 - [ ] Agent 장애/타임아웃 시 재시도·알림 정책 (RCA 실패를 어떻게 가시화할지) — ADR-0002 미결정 항목
 
-## RCA Agent 테스트 — Phase 2 (실제 장애 주입 E2E) — 매니페스트 작성됨, 실행 대기
+## Grafana 알림 규칙 relativeTimeRange 누락 수정 (Phase 2 진행 중 발견) — 배포 대기
+
+Phase 2 시나리오 A 실행 중 발견: `monitoring/alerting/rules/*.yaml`에 `relativeTimeRange`가 없어
+Grafana가 프로비저닝을 통째로 거부, **알림 규칙이 0개 로드**된 상태였다. 경위·확인 방법은 `.harness/DECISIONS.md` 2026-08-29 항목.
+- [x] 규칙 파일 5개에 `relativeTimeRange: {from: 600, to: 0}` 추가 (A·C 양쪽), `kubectl kustomize` 렌더링 확인
+- [ ] 커밋 → `develop` 병합 → ArgoCD `alerting` sync → Grafana sidecar 반영
+- [ ] 검증: 포트포워드 후 `curl -u admin:<pw> localhost:3000/api/v1/provisioning/alert-rules`가 규칙 반환, Grafana 로그에 reload 500 사라짐, "Cluster Alerts" 폴더에 규칙 3종 표시
+- [ ] 이게 되어야 Phase 2가 의미 있음 — 그 전에는 어떤 장애를 넣어도 알림이 안 뜬다
+
+## RCA Agent 테스트 — Phase 2 (실제 장애 주입 E2E) — 규칙 수정 배포 후 실행
 
 Phase 1(합성 webhook 스모크 테스트)은 완료 — `.harness/STATE.md` 참고.
 사용자 결정(2026-08-28): 시나리오 A/B/C/D 전부, 브랜치 `CLIAR-159` 재사용.
+**선행조건: 위 "Grafana 알림 규칙 relativeTimeRange 누락 수정"이 배포·검증되어야 한다.**
+
+2026-08-29 시나리오 A 1차 시도: 파드 CrashLoopBackOff 메트릭까지 확인했으나 규칙 미로드로 webhook 미발화 → 워크로드·`rca-test` ns 정리함.
 
 **산출물 `test/rca-scenarios/phase2/` (작성 완료)**
 - [x] `namespace.yaml` — `rca-test` (라벨 `rca-test: "true"`)

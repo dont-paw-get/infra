@@ -2,6 +2,27 @@
 
 `docs/adr/`에 없는 소규모/운영 결정의 역사 (append-only, 최신이 위). 아키텍처 수준 결정(스택 선정, 호스팅 방식 등)은 여기가 아니라 `docs/adr/`에 기록한다.
 
+## 2026-08-29 — Grafana 알림 규칙에 `relativeTimeRange` 추가 (규칙이 하나도 로드 안 되던 문제)
+
+Phase 2(실제 장애 주입) 첫 시나리오에서 `rca-test` 파드를 CrashLoopBackOff로 만들었는데(`kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}=1` 확인) RCA Agent에 webhook이 오지 않았다. 조사 결과 Grafana에 **알림 규칙이 하나도 로드돼 있지 않았다**(`/api/v1/provisioning/alert-rules` → `[]`). Grafana 컨테이너 로그:
+
+```
+logger=provisioning.alerting msg="starting to provision alerting"
+level=error ... POST /api/admin/provisioning/alerting/reload status=500
+  errorMessageID=alerting.alert-rule.invalidRelativeTime
+  error="Invalid alert rule query A: invalid relative time range [From: 0s, To: 0s]"
+```
+
+`monitoring/alerting/rules/*.yaml`의 각 `data[]` 항목에 `relativeTimeRange`가 없었다. 이 Grafana 버전은 `relativeTimeRange`가 없으면 `[From: 0s, To: 0s]`로 보고 datasource 쿼리에 대해 유효하지 않다고 판단하며, **프로비저닝 reload 전체를 실패**시킨다(파일 하나가 아니라 배치 전체). 그래서 contact point(`discord.yaml`)와 notification policy만 로드되고 규칙 3종(pod-health 2개, pvc-usage, log-error-spike)은 전부 누락됐다. sidecar(`grafana-sc-alerts`)는 파일을 정상적으로 `/etc/grafana/provisioning/alerting/`에 쓰고 있었다 — 문제는 Grafana의 파싱 단계.
+
+이 저장소 배포 이후 실제 알림이 한 번도 동작하지 않았다는 뜻이다. "관측 스택 배포 완료"의 사각지대였다.
+
+**결정:** `monitoring/alerting/rules/`의 5개 파일 모두, 각 쿼리(`refId: A`)와 표현식(`refId: C`)에 `relativeTimeRange: {from: 600, to: 0}`를 추가한다. `instant: true` 쿼리도 필드 자체는 있어야 하고 from>to면 된다. `kubectl kustomize monitoring/alerting/`로 렌더링에 `relativeTimeRange` 8개(배포 대상 pod-health 4 + pvc 2 + log 2)가 들어가는 것을 확인했다.
+
+배포 후 확인: 병합 → ArgoCD `alerting` sync → sidecar 반영 → `curl -u admin:<pw> .../api/v1/provisioning/alert-rules`가 규칙을 반환하는지, Grafana 로그에 reload 500이 사라졌는지.
+
+**영향받은 파일:** `monitoring/alerting/rules/{pod-health,pvc-usage,log-error-spike,http-error-rate,latency}.yaml`.
+
 ## 2026-08-28 — RCA Agent의 Bedrock 모델 ID를 inference profile로 전환
 
 Phase 1 스모크 테스트(합성 webhook)에서 `analyze()`가 Bedrock `ConverseStream` 호출까지 도달한 뒤 죽었다:
