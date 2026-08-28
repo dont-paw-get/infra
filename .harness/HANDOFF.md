@@ -2,6 +2,22 @@
 
 세션마다 무엇을 했는지 (append-only 서술형 로그, 최신이 위). 단계별 완료 요약은 `STATE.md`, 결정 이유는 `DECISIONS.md`/`docs/adr/` 참고.
 
+## 2026-08-29 (2) — 알림 규칙 수정 배포 후 Phase 2 재시도, 버그 3개 추가 발견 (CLIAR-159)
+
+PR #5(`relativeTimeRange` 수정) 병합 → ArgoCD `grafana-alerting` sync → `/api/v1/provisioning/alert-rules`가 규칙 4종 반환, reload 500 소멸 확인. **알림 레이어가 저장소 배포 이후 처음으로 동작 시작.**
+
+시나리오 A(`rca-test` crashloop) 재배포 → `파드 CrashLoopBackOff` 규칙이 `namespace="rca-test"`로 정상 발화(Grafana 로그 aggrGroup 확인). 규칙은 문제없음. 그런데 RCA 후속 메시지가 안 왔고, 파봤더니 버그 3개:
+
+1. **RCA Agent가 liveness probe로 계속 죽음** — `main.py`의 `async def webhook`이 블로킹 `analyze()`를 직접 호출 → 이벤트 루프 정지 → `/healthz` 무응답 → liveness(`timeout=1s failure=3`) 3회 실패 → kubelet kill. `RESTARTS 53`. Grafana webhook도 ~30s 타임아웃. (Phase 1이 됐던 건 curl이 오래 기다렸고 운). 수정: `/webhook` 즉시 200 + `analyze()` 백그라운드 스레드, probe 완화.
+2. **contact point 결합** — `discord.yaml`의 `discord-webhook` receiver 하나에 Discord + rca-agent webhook이 같이 있어, webhook 실패 시 Grafana가 receiver 전체 notify를 실패 처리 → Discord 중복 발송 + 결국 드롭. 수정: rca-agent webhook을 별도 contact point로 분리 + `notification-policy.yaml`에서 `continue: true` 라우팅.
+3. **`로그 ERROR 급증` 규칙 `health: error`** (`DatasourceError` 알림 유발) — Loki 쿼리 A → threshold C 직결이 평가 실패. reduce 단계 필요 추정. 시나리오 C 블로커.
+
+상세·수정안은 `.harness/PLAN.md` "RCA Agent 테스트 — Phase 2" 섹션. 시나리오 A 워크로드·`rca-test` ns 정리 완료. rca-agent는 현재 CrashLoopBackOff(Grafana 재시도 피드백 루프) — 즉시 완화안 2가지 PLAN에 기재.
+
+argocd `argocd-applicationset-controller` CrashLoop(ApplicationSet 캐시 sync 타임아웃, 저장소 범위 밖)은 `.harness/BACKLOG.md`.
+
+**다음 세션이 이어받을 것:** PLAN의 버그 1·2·3 수정. 버그 1·2가 RCA Agent E2E의 실질 블로커. 수정 → PR → 병합 → 배포 후 Phase 2 A~D 재개. 미커밋: `.harness/*`(PLAN/STATE/HANDOFF/BACKLOG).
+
 ## 2026-08-29 — Phase 2 시작, 알림 규칙 미로드 발견 (CLIAR-159)
 
 사용자가 "병합 없이 Phase 2 실행 가능하면 해봐"라고 요청. `test/rca-scenarios/phase2/`는 ArgoCD 대상이 아니라 로컬 작업 트리에서 바로 `kubectl apply` 가능 — Claude가 사용자 머신의 kubeconfig(`--profile mfa`, dpyb-dev)로 직접 실행했다.
