@@ -1,0 +1,4 @@
+# RCA 테스트 시나리오: YAML의 command 블록에 셸 스크립트가 인라인으로 들어가고
+# send-webhook.sh 도 있어, CRLF로 체크아웃되면 컨테이너 /bin/sh 나 bash 에서 깨진다.
+# (예: `exit 1\r`, `sleep 5\r`) 이 경로는 항상 LF 로 고정한다.
+test/rca-scenarios/** text eol=lf
