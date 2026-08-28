@@ -29,11 +29,22 @@ spec:
                 secretKeyRef:
                   name: discord-webhook
                   key: url
+          # 기본값(timeoutSeconds 1, failureThreshold 3)은 너무 빡빡해 파드가 반복 재시작했다
+          # (2026-08-29 실제 발생, RESTARTS 53 — .harness/DECISIONS.md 참고).
+          # 분석은 백그라운드 스레드로 옮겼지만(main.py), probe 자체도 여유를 둔다.
+          # liveness 를 readiness 보다 느슨하게 잡아 일시적 지연에 파드가 죽지 않게 한다.
           readinessProbe:
             httpGet:
               path: /healthz
               port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /healthz
               port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
