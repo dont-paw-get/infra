@@ -2,6 +2,20 @@
 
 `docs/adr/`에 없는 소규모/운영 결정의 역사 (append-only, 최신이 위). 아키텍처 수준 결정(스택 선정, 호스팅 방식 등)은 여기가 아니라 `docs/adr/`에 기록한다.
 
+## 2026-08-29 — RCA Agent 분석을 백그라운드로 분리하고 webhook을 별도 contact point로 재도입
+
+바로 아래 항목(임시 제거)의 2단계. 두 가지를 함께 고쳤다.
+
+**1) `analyze()`가 이벤트 루프를 막던 문제.** `main.py`의 `async def webhook`이 블로킹 `analyze()`(Strands 동기 호출 + Bedrock 30~60s)를 직접 호출했다. 그동안 이벤트 루프가 멈춰 `/healthz`가 응답하지 못하고, liveness probe(기본 `timeoutSeconds: 1`, `failureThreshold: 3`)가 3회 실패해 kubelet이 파드를 죽였다(`RESTARTS 53`). Grafana의 webhook 전송도 같은 이유로 타임아웃됐다. Phase 1 스모크 테스트가 통과했던 건 `curl`이 오래 기다려줬고 probe 타이밍이 우연히 맞았기 때문이다.
+
+**결정:** `/webhook`은 firing 알림을 `BackgroundTasks`에 넘기고 즉시 200을 반환한다. 분석 본체는 `asyncio.to_thread`로 워커 스레드에서 실행해 이벤트 루프를 비워 둔다. 큐잉 방식(`asyncio.Queue` + 워커)도 검토했으나 동시 분석 수 제한이 지금 필요하지 않고 코드가 복잡해져 채택하지 않았다 — 필요해지면 그때 전환한다. 함께 probe를 완화한다: readiness `period 10s/timeout 3s/failure 3`, liveness `initialDelay 15s/period 20s/timeout 5s/failure 6`(liveness를 readiness보다 느슨하게).
+
+부수 효과로 ADR-0002 미결정 항목 "Agent 장애/타임아웃 시 RCA 실패를 어떻게 가시화할지"가 최소한으로 해소됐다 — `analyze()`가 예외를 던지면 Discord에 "RCA 분석 실패" 메시지를 보낸다. 재시도 정책은 여전히 없다.
+
+**2) contact point 분리.** `discord-webhook`(Discord)과 `rca-agent-webhook`(RCA 트리거)을 별도 contact point로 나누고, `notification-policy.yaml`의 루트 아래에 matcher 없는 하위 route 2개(`rca-agent-webhook` `continue: true` → `discord-webhook`)를 두어 모든 알림을 양쪽에 보낸다. 이렇게 해야 Grafana가 두 경로의 성공/실패를 독립적으로 판정한다. 하위 route는 `group_by`/타이밍을 루트에서 상속한다.
+
+**영향받은 파일:** `monitoring/rca-agent/src/main.py`, `monitoring/rca-agent/k8s/deployment.yaml`, `monitoring/alerting/contact-points/discord.yaml`, `monitoring/alerting/policies/notification-policy.yaml`.
+
 ## 2026-08-29 — RCA Agent webhook을 `discord-webhook` contact point에서 임시 제거
 
 `relativeTimeRange` 수정으로 알림이 처음 동작하기 시작하자마자, Grafana가 알림을 못 보내기 시작했다:

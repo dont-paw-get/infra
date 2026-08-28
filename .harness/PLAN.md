@@ -41,22 +41,22 @@ Phase 1(합성 webhook 스모크 테스트)은 완료 — `.harness/STATE.md` �
 
 2026-08-29 시나리오 A 1차 시도(규칙 수정 전): CrashLoopBackOff 메트릭까지 확인했으나 규칙 미로드로 webhook 미발화 → 워크로드·`rca-test` ns 정리함.
 
-**2026-08-29 시나리오 A 2차 시도 결과 — 규칙은 발화했으나 버그 3개 추가 발견 (수정 계획 컨펌 대기)**
+**2026-08-29 시나리오 A 2차 시도 결과 — 규칙은 발화했으나 버그 3개 추가 발견**
 
-`rca-test` crashloop 파드 배포 → `파드 CrashLoopBackOff` 규칙이 `namespace="rca-test"`로 **정상 발화**(Grafana `Sending alerts to local notifier`, aggrGroup에 rca-test 확인). 규칙 자체는 문제없음. 그러나 RCA 후속 메시지가 안 옴:
+`rca-test` crashloop 파드 배포 → `파드 CrashLoopBackOff` 규칙이 `namespace="rca-test"`로 **정상 발화**(Grafana `Sending alerts to local notifier`, aggrGroup에 rca-test 확인). 규칙 자체는 문제없음. 그러나 RCA 후속 메시지가 안 왔고, 원인이 3개였다. 경위·결정은 `.harness/DECISIONS.md` 2026-08-29 항목 참고.
 
-- **버그 1 (심각) — RCA Agent가 liveness probe로 계속 죽는다.** `main.py`의 `async def webhook`이 블로킹 `analyze()`(Strands 동기 호출, Bedrock 30~60s)를 그대로 호출 → 이벤트 루프 정지 → `/healthz` 응답 불가 → liveness(`timeout=1s period=10s failure=3`) 3회 실패 → kubelet이 파드 kill. `RESTARTS 53`, CrashLoopBackOff. Grafana webhook도 ~30s에 타임아웃. Phase 1(curl)이 됐던 건 curl이 오래 기다려줬고 probe 타이밍이 운좋게 맞았을 뿐.
-  - 수정: `/webhook`은 즉시 200 반환하고 `analyze()`를 백그라운드 스레드로(`BackgroundTasks` + `asyncio.to_thread`/`run_in_executor`). `deployment.yaml` probe 완화(`timeoutSeconds: 3`, `failureThreshold: 5`, liveness/readiness 분리, `initialDelaySeconds`).
-- **버그 2 (심각) — contact point가 결합돼 있어 webhook 실패가 Discord까지 망가뜨린다.** `discord.yaml`의 `discord-webhook` receiver 하나에 `discord[0]`(실제 Discord)와 `webhook[0]`(rca-agent)이 같이 있음. webhook[0]이 실패하면 Grafana가 receiver 전체 notify를 실패로 보고 **전체 재시도** → Discord 중복 발송 + 결국 `unrecoverable error`로 드롭. ADR-0002 결정 #3 "두 경로 독립"의 의도와 어긋남(같은 receiver = 독립 아님).
-  - 수정: `rca-agent-webhook`을 **별도 contact point**로 분리하고 `notification-policy.yaml`에서 `continue: true` route로 양쪽에 라우팅. rca-agent 장애가 Discord에 영향 0이 되도록.
-- **버그 3 (중간) — `로그 ERROR 급증` 규칙이 `health: error`(`DatasourceError` 알림 유발).** Loki 쿼리 A(`sum by (app) (count_over_time({namespace=~".+"} | json | level="ERROR" [5m]))`, instant) → threshold C 직결 구조가 평가 실패. reduce 단계(B) 필요하거나 LogQL/instant 처리 문제. 시나리오 C 선행 블로커.
-  - 수정: 별도 조사 후 reduce 단계 추가 또는 쿼리 재작성. `monitoring/alerting/rules/log-error-spike.yaml`.
+- [x] **버그 1 — RCA Agent가 liveness probe로 계속 죽음**(`RESTARTS 53`). 블로킹 `analyze()`가 이벤트 루프를 막아 `/healthz` 무응답. → `main.py`를 `BackgroundTasks` + `asyncio.to_thread`로 전환(즉시 200 반환, 실패 시 Discord에 실패 메시지), `deployment.yaml` probe 완화.
+- [x] **버그 2 — contact point 결합으로 webhook 실패가 Discord까지 망가뜨림.** → `discord-webhook` / `rca-agent-webhook` 별도 contact point로 분리 + `notification-policy.yaml`에 `continue: true` 하위 route 2개.
+- [ ] **버그 3 (중간) — `로그 ERROR 급증` 규칙이 `health: error`**(`DatasourceError` 알림 유발). Loki 쿼리 A(`sum by (app) (count_over_time({namespace=~".+"} | json | level="ERROR" [5m]))`, instant) → threshold C 직결 구조가 평가 실패. reduce 단계(B)가 필요하거나 LogQL/instant 처리 문제로 추정. **시나리오 C 선행 블로커.** 별도 조사 후 `monitoring/alerting/rules/log-error-spike.yaml` 수정.
 
-**즉시 완화 (택1, 사용자 판단)**: rca-agent가 crashloop하며 Grafana 재시도를 계속 받는 피드백 루프 중. (a) `discord.yaml`에서 `rca-agent-webhook-receiver` 임시 제거 → PR (Discord 알림은 즉시 정상화, RCA만 중단), 또는 (b) `kubectl -n monitoring scale deploy/rca-agent --replicas=0`.
+**버그 1·2 배포 후 확인**
+- [ ] CI가 rca-agent 이미지 재빌드 → ArgoCD sync → 파드 `RESTARTS`가 더 이상 늘지 않는지 (`kubectl -n monitoring get pods -l app=rca-agent -w`)
+- [ ] Grafana에 contact point 2개(`discord-webhook`, `rca-agent-webhook`)와 route 2개가 로드됐는지 — `/api/v1/provisioning/contact-points`, `/api/v1/provisioning/policies`
+- [ ] Grafana 로그에서 `Notify for alerts failed` 소멸
 
-**실행 남음 (버그 1·2 수정 배포 후)**
+**실행 남음**
 - [ ] A(crashloop) → Discord 원본 알림 + RCA 후속 메시지 / delete
-- [ ] B(oomkill) / C(log-error-spike, 버그 3도 수정돼야 함) / D(pvc-usage, 느림) → 동일
+- [ ] B(oomkill) / C(버그 3 수정 후) / D(pvc-usage, 느림) → 동일
 - [ ] `kubectl delete ns rca-test`, 결과 STATE 반영
 
 **부수 확인**: `파드 OOMKilled` 규칙 `NoData`(정상), `PVC 사용률` `Normal`(정상), argocd applicationset-controller CrashLoop은 `.harness/BACKLOG.md`.
@@ -87,9 +87,9 @@ Phase 1(합성 webhook 스모크 테스트)은 완료 — `.harness/STATE.md` �
 
 **실행 후**: 결과를 `.harness/STATE.md`에 반영하고 이 섹션 제거. RCA 품질 이슈(빈 결과 처리, 라벨 혼동 등) 발견 시 `monitoring/rca-agent/src/analyzer.py` 조정 항목으로.
 
-## RCA 실패 가시성 (Phase 1 파생 후속)
+## RCA 실패 재시도 정책 (ADR-0002 미결정)
 
-- [ ] `analyze()`가 예외를 던지면 `main.py`의 `/webhook`이 500만 반환하고 Discord엔 아무 것도 안 간다 — 원본 알림과 독립 경로라 사용자는 RCA가 실패했는지조차 모른다. ADR-0002 "미결정: Agent 장애/타임아웃 시 정책"과 직결. 최소한 실패 시 Discord에 "RCA 분석 실패" 짧은 메시지라도 보내는 처리 검토 (`monitoring/rca-agent/src/main.py` / `notifier.py`)
+- [ ] 가시화는 2026-08-29 해소됨(`analyze()` 실패 시 Discord에 "RCA 분석 실패" 전송). 남은 건 **재시도** — 실패한 분석을 다시 돌릴 방법이 없다. Grafana `repeat_interval: 4h`에 기대는 것 외에 Agent 자체 재시도(백오프)를 둘지 논의 필요
 
 ## dev 클러스터 배포 검증 (부트스트랩 중 실제 발견된 이슈)
 
