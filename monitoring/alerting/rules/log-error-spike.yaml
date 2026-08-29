@@ -1,6 +1,12 @@
 # Grafana Alerting provisioning: Loki 로그 ERROR 패턴 급증
 # 애플리케이션이 구조화 로그(JSON)에 level=ERROR 필드를 출력한다고 가정.
 # TODO(open issue, ADR-0001): threshold(분당 5건)는 러프한 초기값.
+#
+# Loki 쿼리(A)는 instant: true 여도 시계열(matrix)을 돌려주므로 threshold에 바로 물리면
+# "looks like time series data, only reduced data can be alerted on."으로 평가가 실패하고
+# 규칙이 DatasourceError를 계속 발화한다(2026-08-29 실제 발생). reduce(B) 단계를 끼워
+# 시리즈별 마지막 값을 스칼라로 만든 뒤 threshold(C)에 넣는다.
+# Prometheus 규칙(pod-health/pvc-usage)은 instant 쿼리가 스칼라를 돌려줘 reduce가 필요 없다.
 apiVersion: 1
 
 groups:
@@ -23,6 +29,17 @@ groups:
               expr: |
                 sum by (app) (count_over_time({namespace=~".+"} | json | level="ERROR" [5m]))
               instant: true
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+              settings:
+                mode: dropNN
           - refId: C
             relativeTimeRange:
               from: 600
@@ -30,7 +47,7 @@ groups:
             datasourceUid: __expr__
             model:
               type: threshold
-              expression: A
+              expression: B
               conditions:
                 - evaluator:
                     type: gt

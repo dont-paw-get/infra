@@ -31,61 +31,28 @@ Strands SDK(AWS) + Amazon Bedrock으로 Grafana Alerting 발화를 트리거 받
 - [ ] (백로그) k8s 이벤트/describe pod 조회 tool 추가 — CrashLoopBackOff/OOMKilled 원인(재시작 사유, 리소스 limit 초과 등) 파악에 유용하나, `rca-agent-irsa` ServiceAccount에 새 Kubernetes RBAC(get/list pods, events) 부여가 필요해 별도 논의 후 진행. 현재는 Prometheus/Loki만 조회하는 순수 read 권한만 있음
 - [ ] Agent 장애/타임아웃 시 재시도·알림 정책 (RCA 실패를 어떻게 가시화할지) — ADR-0002 미결정 항목
 
-## RCA Agent 테스트 — Phase 2 (실제 장애 주입 E2E)
+## RCA Agent 테스트 — Phase 2 (실제 장애 주입 E2E) — A·B 완료, C·D 진행 중
 
-Phase 1(합성 webhook 스모크 테스트)은 완료 — `.harness/STATE.md` 참고.
+Phase 1(합성 webhook)은 완료 — `.harness/STATE.md` 참고. 산출물은 `test/rca-scenarios/phase2/`(A~D + README).
 사용자 결정(2026-08-28): 시나리오 A/B/C/D 전부, 브랜치 `CLIAR-159` 재사용.
 
-**선행조건 완료 (2026-08-29):** 알림 규칙 `relativeTimeRange` 수정 PR #5 병합 → ArgoCD `grafana-alerting` sync →
-`/api/v1/provisioning/alert-rules`가 규칙 4종 반환(CrashLoopBackOff/OOMKilled/PVC/로그), Grafana 로그 reload 500 소멸, 전 규칙 `health: ok` 확인.
+진행 과정에서 관측 스택 버그 4건이 드러나 먼저 고쳤다 — 경위는 `.harness/DECISIONS.md` 2026-08-29 항목 3개 참고:
+알림 규칙 미로드(`relativeTimeRange`, PR #5) → contact point 결합(PR #6/#7) → Agent 블로킹 호출(PR #7) → argocd ApplicationSet CRD 누락(클러스터 조치).
 
-2026-08-29 시나리오 A 1차 시도(규칙 수정 전): CrashLoopBackOff 메트릭까지 확인했으나 규칙 미로드로 webhook 미발화 → 워크로드·`rca-test` ns 정리함.
+**시나리오 결과**
+- [x] **A (CrashLoopBackOff)** — 알림 `Pending`→`Alerting` 발화, webhook 수신, `query_prometheus_range`/`query_loki` 호출 후 분석 생성. `fatal: simulated crash, exiting non-zero` 로그와 재시작 추세(2→6)를 근거로 제시, 테스트 파드임까지 인지. 정리 완료
+- [x] **B (OOMKilled)** — 발화·분석 정상. `kube_pod_container_resource_limits`로 32MiB limit 확인, `allocating memory until OOM` 로그 인용, `container_memory_working_set_bytes`가 빈 이유(이미 종료돼 수집 안 됨)까지 추론. 정리 완료
+- [ ] **D (PVC 사용률)** — 2026-08-29 투입, PVC `Bound`·filler Job Running. `for: 10m` + interval 5m라 발화까지 15~20분. 결과 확인 후 `kubectl delete -f D-pvc-usage.yaml`
+- [ ] **C (로그 ERROR 급증)** — 아래 log-error-spike 수정이 배포된 뒤 실행
 
-**2026-08-29 시나리오 A 2차 시도 결과 — 규칙은 발화했으나 버그 3개 추가 발견**
+**log-error-spike 규칙 수정 (버그 3) — 배포 대기**
+RCA Agent가 `DatasourceError` 알림을 분석하며 원인을 정확히 짚었다: `looks like time series data, only reduced data can be alerted on.`
+Loki 쿼리는 `instant: true`여도 시계열을 돌려주므로 threshold에 직결할 수 없다.
+- [x] `monitoring/alerting/rules/log-error-spike.yaml`에 reduce 단계 추가 — `A(loki) → B(reduce/last) → C(threshold on B)`, `condition: C`. `kubectl kustomize` 렌더링 확인
+- [ ] 병합 → ArgoCD `grafana-alerting` sync → 규칙 `health: ok` 확인(현재 `error`) → 시나리오 C 실행
 
-`rca-test` crashloop 파드 배포 → `파드 CrashLoopBackOff` 규칙이 `namespace="rca-test"`로 **정상 발화**(Grafana `Sending alerts to local notifier`, aggrGroup에 rca-test 확인). 규칙 자체는 문제없음. 그러나 RCA 후속 메시지가 안 왔고, 원인이 3개였다. 경위·결정은 `.harness/DECISIONS.md` 2026-08-29 항목 참고.
-
-- [x] **버그 1 — RCA Agent가 liveness probe로 계속 죽음**(`RESTARTS 53`). 블로킹 `analyze()`가 이벤트 루프를 막아 `/healthz` 무응답. → `main.py`를 `BackgroundTasks` + `asyncio.to_thread`로 전환(즉시 200 반환, 실패 시 Discord에 실패 메시지), `deployment.yaml` probe 완화.
-- [x] **버그 2 — contact point 결합으로 webhook 실패가 Discord까지 망가뜨림.** → `discord-webhook` / `rca-agent-webhook` 별도 contact point로 분리 + `notification-policy.yaml`에 `continue: true` 하위 route 2개.
-- [ ] **버그 3 (중간) — `로그 ERROR 급증` 규칙이 `health: error`**(`DatasourceError` 알림 유발). Loki 쿼리 A(`sum by (app) (count_over_time({namespace=~".+"} | json | level="ERROR" [5m]))`, instant) → threshold C 직결 구조가 평가 실패. reduce 단계(B)가 필요하거나 LogQL/instant 처리 문제로 추정. **시나리오 C 선행 블로커.** 별도 조사 후 `monitoring/alerting/rules/log-error-spike.yaml` 수정.
-
-**버그 1·2 배포 후 확인**
-- [ ] CI가 rca-agent 이미지 재빌드 → ArgoCD sync → 파드 `RESTARTS`가 더 이상 늘지 않는지 (`kubectl -n monitoring get pods -l app=rca-agent -w`)
-- [ ] Grafana에 contact point 2개(`discord-webhook`, `rca-agent-webhook`)와 route 2개가 로드됐는지 — `/api/v1/provisioning/contact-points`, `/api/v1/provisioning/policies`
-- [ ] Grafana 로그에서 `Notify for alerts failed` 소멸
-
-**실행 남음**
-- [ ] A(crashloop) → Discord 원본 알림 + RCA 후속 메시지 / delete
-- [ ] B(oomkill) / C(버그 3 수정 후) / D(pvc-usage, 느림) → 동일
-- [ ] `kubectl delete ns rca-test`, 결과 STATE 반영
-
-**부수 확인**: `파드 OOMKilled` 규칙 `NoData`(정상), `PVC 사용률` `Normal`(정상), argocd applicationset-controller CrashLoop은 `.harness/BACKLOG.md`.
-
-**산출물 `test/rca-scenarios/phase2/` (작성 완료)**
-- [x] `namespace.yaml` — `rca-test` (라벨 `rca-test: "true"`)
-- [x] `A-crashloop.yaml` — busybox 10초 뒤 `exit 1` 반복 → `파드 CrashLoopBackOff` (for 2m)
-- [x] `B-oomkill.yaml` — mem limit 32Mi + `tail /dev/zero` → `파드 OOMKilled` (for 0m). CrashLoop 부수 발화 가능(분석 2회)
-- [x] `C-log-error-spike.yaml` — 5초마다 JSON `level=ERROR` stdout(분당 12건). 파드 `app.kubernetes.io/name: rca-test-logspike` → Loki `app` 라벨. `로그 ERROR 급증` (for 5m). loki-0 Running 전제
-- [x] `D-pvc-usage.yaml` — `auto-ebs-sc` 1Gi PVC + Job이 `dd` 900MiB 채우고 `sleep 3600`으로 마운트 유지. `PVC 사용률 초과` (for 10m + interval 5m → 15~20분). expr에 네임스페이스 필터 없음(클러스터 전체 대상)
-- [x] `README.md` — 실행 순서, 대기 시간, **정리 명령**, Discord 공지 안내, 알림 안 뜰 때 디버깅
-- [x] `kubectl apply --dry-run=client -f test/rca-scenarios/phase2/` 전부 통과, UTF-8 YAML 로드 확인
-
-**실행 전 사용자 확인 (README에도 있음)**
-- [ ] `kubectl -n monitoring get pod loki-0` → `Running 2/2`? 아니면 C 스킵
-- [ ] `kubectl get pvc -A` / Grafana에서 이미 85% 넘는 PVC 있는지 → 있으면 D가 노이즈에 묻힘
-- [ ] 팀에 Discord 알림 6~8건 발생 공지
-
-**실행 절차 (시나리오 하나씩)**
-1. `kubectl apply -f test/rca-scenarios/phase2/namespace.yaml` (최초 1회)
-2. `kubectl apply -f test/rca-scenarios/phase2/<A|B|C|D>-*.yaml`
-3. 발화 확인 (Grafana Alerting > Active) → Discord에 **원본 알림 + `RCA: <알림명>`** 둘 다, RCA가 실제 메트릭/로그 인용하는지
-4. `kubectl delete -f test/rca-scenarios/phase2/<파일>` (즉시)
-5. 다음 시나리오
-6. 끝나면 `kubectl delete ns rca-test`
-
-**비용/리스크**: 분석 1회당 수십 센트, 전체 ~$1~2. 최대 리스크는 정리 누락(firing 유지 시 4h마다 재분석).
-
-**실행 후**: 결과를 `.harness/STATE.md`에 반영하고 이 섹션 제거. RCA 품질 이슈(빈 결과 처리, 라벨 혼동 등) 발견 시 `monitoring/rca-agent/src/analyzer.py` 조정 항목으로.
+**마무리**
+- [ ] 전부 끝나면 `kubectl delete ns rca-test`, 결과를 `.harness/STATE.md`에 반영하고 이 섹션 제거
 
 ## RCA 실패 재시도 정책 (ADR-0002 미결정)
 
