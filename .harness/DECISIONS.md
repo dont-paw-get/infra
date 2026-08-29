@@ -2,6 +2,42 @@
 
 `docs/adr/`에 없는 소규모/운영 결정의 역사 (append-only, 최신이 위). 아키텍처 수준 결정(스택 선정, 호스팅 방식 등)은 여기가 아니라 `docs/adr/`에 기록한다.
 
+## 2026-08-29 — `로그 ERROR 급증` 규칙에 reduce 단계 추가
+
+Phase 2 실행 중 `로그 ERROR 급증` 규칙이 계속 `health: error`로 남아 `DatasourceError` 알림을 발화했다. 공교롭게 그 알림이 RCA Agent로 전달됐고, **Agent가 원인을 정확히 진단했다**:
+
+```
+invalid format of evaluation results for the alert definition C:
+looks like time series data, only reduced data can be alerted on.
+```
+
+Loki 쿼리는 `instant: true`를 줘도 시계열(matrix)을 돌려주기 때문에 threshold 표현식에 바로 물릴 수 없다. Prometheus 쿼리는 instant일 때 스칼라를 돌려줘서 같은 구조가 동작했고, 그래서 Loki 규칙만 실패했다.
+
+**결정:** `monitoring/alerting/rules/log-error-spike.yaml`에 reduce 단계를 끼운다 — `A(loki 쿼리) → B(reduce, reducer: last) → C(threshold on B)`, `condition: C`. 다른 4개 규칙(Prometheus 기반)은 그대로 둔다.
+
+**영향받은 파일:** `monitoring/alerting/rules/log-error-spike.yaml`.
+
+## 2026-08-29 — 누락된 `applicationsets.argoproj.io` CRD 설치 (Discord 알림 중복의 진짜 원인)
+
+RCA Agent 비동기화·contact point 분리(아래 항목)를 배포한 뒤에도 사용자가 "Discord 알림이 여전히 중복 도착한다"고 보고했다. Grafana 로그를 다시 보니 `Notify for alerts failed`는 완전히 사라졌고(= contact point 분리는 유효했다) 전송은 매번 성공하고 있었다. 그런데 전송 시각이 `22:28 → 22:33(5분) → 22:35(2분)` 패턴으로 계속됐다.
+
+원인은 알림 설정이 아니라 **알림 대상 파드가 실제로 7분 주기로 플래핑**하는 것이었다. `argocd/argocd-applicationset-controller`가 439회 재시작 중이었고, 로그는 `failed to wait for applicationset caches to sync kind source: *v1alpha1.ApplicationSet: timed out waiting for cache to be synced`. `kubectl get crd | grep argoproj` 결과 `applications`/`appprojects`만 있고 **`applicationsets.argoproj.io`가 없었다**. 컨트롤러 Deployment와 RBAC(`applicationsets` 권한 포함)는 정상 존재 — CRD만 빠진 상태.
+
+파드 사이클(기동 → 2분 대기 → 타임아웃 종료 → ~5분 backoff)이 메트릭에 그대로 반영된다: backoff 중에는 `kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}=1`, 실행 중에는 시계열이 사라진다. 규칙의 `noDataState: OK` 때문에 시계열이 사라지면 알림이 해소되고, 돌아오면 다시 발화한다 — 7분마다 발화+해소 메시지 한 쌍이 Discord에 도착하는 것이 "중복"의 정체였다. **알림 스택은 정상 동작하며 실제로 고장난 파드를 정확히 보고하고 있었다.**
+
+CRD가 빠진 경위는 이 저장소가 이미 겪은 함정과 같은 것으로 추정된다 — ApplicationSet CRD는 용량이 커서 client-side `kubectl apply`로는 `metadata.annotations: Too long`(262144 bytes)에 걸린다(`.harness/ARCHITECTURE.md`의 `ServerSideApply=true` 항목 참고).
+
+**결정:** ArgoCD 설치는 이 저장소 범위 밖(ADR-0003)이지만 알림 노이즈의 원인이므로 사용자 확인 후 누락 CRD를 설치한다:
+
+```
+kubectl apply --server-side -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.1/manifests/crds/applicationset-crd.yaml
+kubectl -n argocd rollout restart deploy/argocd-applicationset-controller
+```
+
+`--server-side`를 쓰는 것이 핵심 — client-side면 같은 이유로 다시 실패한다. 컨트롤러를 0으로 스케일하는 안(이 저장소는 flat Application만 쓰고 ApplicationSet을 쓰지 않음)도 검토했으나, ArgoCD 설치를 온전한 상태로 되돌리는 쪽을 택했다.
+
+**영향받은 파일:** 없음(클러스터 조치 — ArgoCD는 이 저장소가 소유하지 않는다).
+
 ## 2026-08-29 — RCA Agent 분석을 백그라운드로 분리하고 webhook을 별도 contact point로 재도입
 
 바로 아래 항목(임시 제거)의 2단계. 두 가지를 함께 고쳤다.

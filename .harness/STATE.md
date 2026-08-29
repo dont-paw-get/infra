@@ -85,3 +85,13 @@
   - Phase 2(실제 장애 주입 E2E)는 매니페스트(`test/rca-scenarios/phase2/`)만 작성 — 아래 알림 규칙 수정 배포 후 실행
 - [x] **Grafana 알림 규칙이 하나도 로드 안 되던 문제 발견·수정 (2026-08-29, CLIAR-159 PR #5)** — `monitoring/alerting/rules/*.yaml`에 `relativeTimeRange`가 없어 Grafana가 프로비저닝 reload를 통째로 거부(`invalidRelativeTime`, POST reload 500). contact point/policy만 로드되고 규칙은 0개였다 — 저장소 배포 이후 알림이 한 번도 동작하지 않았음. 5개 파일에 `relativeTimeRange: {from: 600, to: 0}` 추가. 병합·배포 후 `/api/v1/provisioning/alert-rules`가 규칙 4종 반환, reload 500 소멸, 전 규칙 `health: ok` 확인. 경위는 `.harness/DECISIONS.md` 2026-08-29
   - 규칙 로드 직후 `파드 CrashLoopBackOff`가 `argocd/argocd-applicationset-controller`(430회 재시작, 저장소 범위 밖 기존 이슈)에 대해 pending — `.harness/BACKLOG.md`
+- [x] **RCA Agent 비동기화 + 알림 경로 분리 (2026-08-29, CLIAR-159 PR #6·#7)** — 알림이 처음 흐르기 시작하자 드러난 버그 2건. 경위는 `.harness/DECISIONS.md` 2026-08-29
+  - `main.py`: `/webhook`이 `BackgroundTasks`에 넘기고 즉시 200 반환, 분석은 `asyncio.to_thread`로 워커 스레드 실행. 기존엔 블로킹 `analyze()`가 이벤트 루프를 막아 `/healthz`가 응답 못 해 liveness probe가 파드를 죽였다(`RESTARTS 53`). `deployment.yaml` probe도 완화. 분석 실패 시 Discord에 실패 메시지 전송 — ADR-0002 "RCA 실패 가시화" 미결정 해소(재시도는 미결정 유지)
+  - contact point를 `discord-webhook`/`rca-agent-webhook` 2개로 분리하고 `notification-policy.yaml`에 `continue: true` 하위 route 2개 배치 — Grafana는 contact point 단위로 notify 성공/실패를 판정하므로 결합 시 RCA 전송 실패가 Discord 알림의 중복 재시도·드롭으로 번졌다. ADR-0002 결정 #3의 "두 경로 독립"은 분리해야 성립
+  - 배포 후 확인: 파드 `RESTARTS 0`으로 안정, Grafana 로그의 `Notify for alerts failed` 소멸
+- [x] **argocd `applicationsets.argoproj.io` CRD 누락 해결 (2026-08-29, 클러스터 조치)** — contact point 분리 후에도 남던 Discord "중복"의 진짜 원인. CRD가 없어 `argocd-applicationset-controller`가 캐시 sync 타임아웃 후 종료를 7분 주기로 반복(439회 재시작) → 메트릭이 나타났다 사라지며 발화/해소 메시지가 쌍으로 발송됐다. `kubectl apply --server-side`로 CRD 설치 후 컨트롤러 `RESTARTS 0` 안정, 알림 중단 확인. ArgoCD는 이 저장소 소유가 아니므로 파일 변경 없음 — `.harness/DECISIONS.md`
+- [x] **RCA Agent Phase 2 시나리오 A·B 검증 완료 (2026-08-29)** — 실제 장애 주입 → 알림 발화 → webhook → Bedrock 분석 → Discord 전 구간 동작 확인
+  - A(CrashLoopBackOff): `fatal: simulated crash, exiting non-zero` 로그 + 재시작 추세(2→6) 인용, 테스트 파드임을 자체 인지
+  - B(OOMKilled): 32MiB limit 조회, `allocating memory until OOM` 로그 인용, 종료된 컨테이너라 working set 메트릭이 빈 이유까지 추론
+  - 부수 성과: Agent가 `DatasourceError` 알림을 분석하며 `로그 ERROR 급증` 규칙의 reduce 누락(버그 3)과 argocd ApplicationSet CRD 누락을 각각 정확히 진단 — 사람이 찾은 결론과 일치
+  - C(로그 ERROR 급증)·D(PVC 사용률)는 진행 중 — `.harness/PLAN.md`
