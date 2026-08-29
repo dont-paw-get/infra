@@ -4,6 +4,8 @@ Organization의 Kubernetes 클러스터를 대상으로 하는 공유 관측(Obs
 메트릭/로그 수집, 시각화, Discord 알림 파이프라인을 소유한다. 각 서비스 저장소(`backend-book` 등)는
 계측 지점(메트릭 엔드포인트 노출, 구조화 로깅)과 자신의 `ServiceMonitor` CR만 책임진다.
 
+구축 과정 전체(스택 선정 이유, 구성 방법, RCA Agent, 동작 흐름, 트러블슈팅, 확장 계획)는
+**[docs/implementation.md](docs/implementation.md)** 에 정리되어 있다.
 결정 배경과 근거는 [docs/adr/0001-observability-stack.md](docs/adr/0001-observability-stack.md) 참고.
 
 ## 스택
@@ -15,6 +17,7 @@ Organization의 Kubernetes 클러스터를 대상으로 하는 공유 관측(Obs
 ## 구조
 
 ```
+docs/implementation.md         구축 과정 정리 (스택 선정·구성·RCA Agent·트러블슈팅·확장 계획)
 docs/adr/                      아키텍처 결정 기록
 monitoring/
   namespace.yaml                monitoring 네임스페이스
