@@ -94,4 +94,8 @@
   - A(CrashLoopBackOff): `fatal: simulated crash, exiting non-zero` 로그 + 재시작 추세(2→6) 인용, 테스트 파드임을 자체 인지
   - B(OOMKilled): 32MiB limit 조회, `allocating memory until OOM` 로그 인용, 종료된 컨테이너라 working set 메트릭이 빈 이유까지 추론
   - 부수 성과: Agent가 `DatasourceError` 알림을 분석하며 `로그 ERROR 급증` 규칙의 reduce 누락(버그 3)과 argocd ApplicationSet CRD 누락을 각각 정확히 진단 — 사람이 찾은 결론과 일치
-  - C(로그 ERROR 급증)·D(PVC 사용률)는 진행 중 — `.harness/PLAN.md`
+  - D(PVC 사용률): 900MB/973MB=92.5%를 직접 계산해 알림값과 대조, Loki에서 `dd` 출력 인용, 같은 네임스페이스의 다른 테스트 파드까지 발견해 테스트 환경으로 추론
+  - C(로그 ERROR 급증): `simulated error 67~79`를 5초 간격으로 확인, Prometheus 교차 확인으로 재시작 0건임을 짚어 "크래시가 아닌 애플리케이션 레벨 로그 문제"로 범위 축소. **Alloy→Loki 수집 경로와 `app` 라벨 리라벨링도 함께 검증됨**
+  - 시나리오 4종 종료 후 `kubectl delete ns rca-test`로 정리 완료(PVC·EBS 볼륨 포함)
+- [x] `로그 ERROR 급증` 규칙 reduce 단계 추가 (2026-08-29, CLIAR-159 PR #8) — Loki 쿼리는 `instant: true`여도 시계열을 돌려줘 threshold에 직결할 수 없다. `A(loki) → B(reduce/last) → C(threshold on B)`로 변경. 배포 후 `health: error` → `ok` 전환 확인, `DatasourceError` 알림 소멸. 원인은 RCA Agent가 해당 알림을 분석하며 정확히 진단 — `.harness/DECISIONS.md` 2026-08-29
+- [x] Loki S3 연동 실제 동작 확인 (2026-08-29) — `loki-0` 20시간 `Running 2/2`, ServiceAccount에 IRSA(`dpgy-infra-loki`) 주입 확인, 로그에 자격증명/AccessDenied 에러 없음, ingester가 정상적으로 청크를 flush 중

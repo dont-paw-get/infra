@@ -2,6 +2,22 @@
 
 세션마다 무엇을 했는지 (append-only 서술형 로그, 최신이 위). 단계별 완료 요약은 `STATE.md`, 결정 이유는 `DECISIONS.md`/`docs/adr/` 참고.
 
+## 2026-08-29 (3) — Phase 2 시나리오 A~D 전부 검증 완료 (CLIAR-159)
+
+버그 수정(PR #6·#7)과 argocd CRD 조치가 배포된 뒤 Phase 2를 재개해 시나리오 4종을 모두 통과시켰다. 각 시나리오는 하나씩 apply → 발화 확인 → RCA 분석 확인 → delete 순으로 진행했고, 마지막에 `kubectl delete ns rca-test`로 정리했다.
+
+**A(CrashLoopBackOff)**: 알림 `Pending`→`Alerting`(95초), webhook 수신, Agent가 `fatal: simulated crash, exiting non-zero` 로그와 재시작 추세(2→6)를 인용. **B(OOMKilled)**: `kube_pod_container_resource_limits`로 32MiB limit 확인, `allocating memory until OOM` 로그 인용, `container_memory_working_set_bytes`가 빈 이유(이미 종료돼 수집 안 됨)까지 추론. **D(PVC)**: 900MB/973MB=92.5%를 직접 계산해 알림값과 대조, `dd` 출력 인용, 같은 네임스페이스의 다른 테스트 파드까지 발견해 테스트 환경으로 추론. **C(로그 ERROR 급증)**: `simulated error 67~79`를 5초 간격으로 확인, 재시작 0건 교차 확인으로 크래시가 아님을 짚음 — Alloy→Loki 수집 경로와 `app` 라벨 리라벨링도 함께 검증됐다.
+
+**Agent가 우리 인프라 버그 2건을 스스로 진단한 것이 이번 세션의 수확이다.** (1) `DatasourceError` 알림을 분석하며 `로그 ERROR 급증` 규칙의 reduce 누락을 정확히 짚었고(`looks like time series data, only reduced data can be alerted on`), 처방까지 제시해 그대로 PR #8로 반영했다. (2) argocd CrashLoop 알림을 분석하며 `failed to get restmapping: no matches for kind "ApplicationSet"` 로그를 찾아내 CRD 누락을 특정했다 — 사람이 수동으로 도달한 결론과 일치했고, 심지어 메모리 사용량을 확인해 OOM 가능성을 배제하는 과정까지 거쳤다.
+
+Discord "중복 알림"의 최종 원인은 알림 설정이 아니라 `argocd-applicationset-controller`가 7분 주기로 플래핑한 것이었다(CRD 누락 → 캐시 sync 타임아웃 → 종료 반복, 439회). 메트릭이 나타났다 사라지며 발화/해소 메시지가 쌍으로 발송됐다. `kubectl apply --server-side`로 CRD를 설치해 해결(`RESTARTS 0` 안정, 알림 중단 확인). ArgoCD는 이 저장소 소유가 아니라 파일 변경은 없다.
+
+부수 확인: Loki S3 연동이 실제로 동작 중임을 확인했다(20시간 `Running 2/2`, IRSA 주입됨, 자격증명 에러 없음, ingester가 청크 flush 중) — `PLAN.md`의 "dev 클러스터 배포 검증" 섹션을 제거했다.
+
+**운영 메모:** AWS MFA 임시 자격증명은 12시간이라 세션 중간에 만료됐다(`You must be logged in to the server (Unauthorized)`). 갱신은 `aws sts get-session-token --serial-number arn:aws:iam::594532711953:mfa/otp-cli --token-code <6자리>` 후 `aws configure set ... --profile mfa` 3줄, `update-kubeconfig` 재실행은 불필요.
+
+**다음 세션이 이어받을 것:** `.harness/PLAN.md`의 "RCA Agent 후속 개선"(k8s 이벤트 조회 tool·RBAC, 분석 품질 튜닝, 동시 분석 수 제한)과 "RCA 실패 재시도 정책". 알림 threshold 튜닝과 서비스 저장소 계측 연동도 그대로 남아있다.
+
 ## 2026-08-29 (2) — 알림 규칙 수정 배포 후 Phase 2 재시도, 버그 3개 추가 발견 (CLIAR-159)
 
 PR #5(`relativeTimeRange` 수정) 병합 → ArgoCD `grafana-alerting` sync → `/api/v1/provisioning/alert-rules`가 규칙 4종 반환, reload 500 소멸 확인. **알림 레이어가 저장소 배포 이후 처음으로 동작 시작.**
