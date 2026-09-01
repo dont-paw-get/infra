@@ -1,0 +1,33 @@
+# Helm 차트는 업스트림 repo에서, values는 이 저장소(monitoring/otel-collector/values.yaml)에서 가져오는 멀티소스 구성.
+# Tempo 내부 서비스에 trace를 export하므로 Tempo와 같은 wave 0에 둔다. 필요하면 ArgoCD UI에서 Tempo를 먼저 sync한다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: otel-collector
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+      chart: opentelemetry-collector
+      # artifacthub.io 기준 2026-09-01 확인한 최신 안정 버전. 이후 갱신 시 open-telemetry/opentelemetry-collector chart를 재확인.
+      targetRevision: "0.170.0"
+      helm:
+        valueFiles:
+          - $values/monitoring/otel-collector/values.yaml
+    - repoURL: https://github.com/dont-paw-get/infra.git
+      targetRevision: develop
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - CreateNamespace=true

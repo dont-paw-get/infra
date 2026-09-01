@@ -40,7 +40,7 @@ grafana:
     alerting:
       enabled: false # legacy alerting 비활성화 (unified alerting 사용)
 
-  # Loki를 두 번째 데이터소스로 등록한다. uid를 고정해 alerting 규칙(monitoring/alerting/rules)에서 참조한다.
+  # Loki/Tempo를 추가 데이터소스로 등록한다. uid를 고정해 alerting 규칙과 trace/log correlation에서 참조한다.
   additionalDataSources:
     - name: Loki
       type: loki
@@ -49,6 +49,30 @@ grafana:
       url: http://loki-gateway.monitoring.svc.cluster.local
       jsonData:
         maxLines: 1000
+        derivedFields:
+          # 애플리케이션 JSON stdout의 trace_id 필드를 Tempo trace 링크로 연결한다.
+          # trace_id는 high cardinality 값이라 Loki label로 승격하지 않는다.
+          - name: TraceID
+            matcherRegex: '"trace_id"\s*:\s*"([A-Fa-f0-9]{16,32})"'
+            datasourceUid: tempo
+            url: "$${__value.raw}"
+    - name: Tempo
+      type: tempo
+      uid: tempo
+      access: proxy
+      url: http://tempo.monitoring.svc.cluster.local:3200
+      jsonData:
+        httpMethod: GET
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: "-5m"
+          spanEndTimeShift: "5m"
+          filterByTraceID: false
+          filterBySpanID: false
+          customQuery: true
+          query: '{namespace=~".+"} | json | trace_id="$${__trace.traceId}"'
+        serviceMap:
+          datasourceUid: prometheus
 
   # monitoring/alerting/ 하위 YAML을 ConfigMap(label: grafana_alert=1)으로 만들어두면
   # 이 sidecar가 자동으로 읽어 /etc/grafana/provisioning/alerting/에 반영한다.

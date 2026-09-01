@@ -1,8 +1,8 @@
 # infra
 
 Organization의 Kubernetes 클러스터를 대상으로 하는 공유 관측(Observability) 인프라 저장소.
-메트릭/로그 수집, 시각화, Discord 알림 파이프라인을 소유한다. 각 서비스 저장소(`backend-book` 등)는
-계측 지점(메트릭 엔드포인트 노출, 구조화 로깅)과 자신의 `ServiceMonitor` CR만 책임진다.
+메트릭/로그/트레이스 수집, 시각화, Discord 알림 파이프라인을 소유한다. 각 서비스 저장소(`backend-book` 등)는
+계측 지점(메트릭 엔드포인트 노출, 구조화 로깅, OpenTelemetry trace 생성)과 자신의 `ServiceMonitor` CR만 책임진다.
 
 구축 과정 전체(스택 선정 이유, 구성 방법, RCA Agent, 동작 흐름, 트러블슈팅, 확장 계획)는
 **[docs/implementation.md](docs/implementation.md)** 에 정리되어 있다.
@@ -12,6 +12,7 @@ Organization의 Kubernetes 클러스터를 대상으로 하는 공유 관측(Obs
 
 - **메트릭**: Prometheus + Grafana + kube-state-metrics + node-exporter (`kube-prometheus-stack` Helm 차트)
 - **로그**: Loki + Alloy (DaemonSet, 모든 노드의 컨테이너 stdout 수집)
+- **트레이스**: OpenTelemetry Collector + Tempo (OTLP HTTP/protobuf `:4318`, dev 단일 바이너리)
 - **알림**: Grafana Alerting → Discord contact point (Alertmanager 미사용)
 
 ## 구조
@@ -25,6 +26,8 @@ monitoring/
   kube-prometheus-stack/        Prometheus + Grafana Helm values
   loki/                         Loki Helm values
   alloy/                        Alloy(로그 수집 에이전트) Helm values
+  tempo/                        Tempo Helm values (trace 저장/조회 backend)
+  otel-collector/               OpenTelemetry Collector Helm values (OTLP trace 수집)
   alerting/
     kustomization.yaml          provisioning YAML → ConfigMap 생성(Kustomize)
     contact-points/discord.yaml Discord 연락처 프로비저닝
@@ -44,6 +47,7 @@ test/rca-scenarios/             RCA Agent 검증용 합성 webhook 페이로드 
 1. `./scripts/install.sh` 실행 — `monitoring` 네임스페이스 생성 + `monitoring/argocd/`의 Application CR을 최초 1회 등록.
 2. 이후 이 저장소에 대한 변경은 커밋 → ArgoCD 자동 동기화로 반영된다. 시크릿(Grafana admin, Discord 웹훅)은 AWS Secrets Manager에 값을 넣어두면 External Secrets Operator가 자동 동기화한다 (`secrets/README.md`).
 3. 각 서비스 저장소에 `/actuator/prometheus`(또는 동등한 엔드포인트) 노출 + `ServiceMonitor` CR 추가.
+4. trace 계측이 있는 서비스는 dev overlay에 `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318` 설정.
 
 ## 미해결 이슈
 

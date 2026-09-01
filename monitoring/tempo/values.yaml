@@ -1,0 +1,65 @@
+# grafana-community/tempo Helm chart
+# dev 환경용 Grafana Tempo 단일 바이너리. Trace는 Collector를 통해서만 받고 외부 노출은 만들지 않는다.
+
+fullnameOverride: tempo
+replicas: 1
+
+tempo:
+  reportingEnabled: false
+  retention: 24h
+  memBallastSizeMbs: 128
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
+
+  storage:
+    trace:
+      # dev에서는 운영 복잡도와 비용을 줄이기 위해 PVC 로컬 저장을 쓴다.
+      # prod 확장 시 S3/object storage backend로 전환한다.
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+  receivers:
+    jaeger:
+      protocols:
+        grpc:
+          endpoint: null
+        thrift_binary:
+          endpoint: null
+        thrift_compact:
+          endpoint: null
+        thrift_http:
+          endpoint: null
+    otlp:
+      protocols:
+        grpc:
+          endpoint: null
+        http:
+          endpoint: "0.0.0.0:4318"
+
+service:
+  type: ClusterIP
+
+persistence:
+  enabled: true
+  storageClassName: auto-ebs-sc
+  accessModes:
+    - ReadWriteOnce
+  size: 5Gi
+
+tempoQuery:
+  enabled: false
+
+serviceMonitor:
+  enabled: false
+
+networkPolicy:
+  enabled: false
