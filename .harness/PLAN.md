@@ -3,6 +3,18 @@
 아직 끝나지 않은 계획과 체크리스트만 남긴다. 완료되면 항목을 지우고 `.harness/STATE.md`에 단계 한 줄로 반영한다.
 배경/근거는 각 항목에 표시된 파일 참고 (주로 `docs/adr/0001-observability-stack.md`).
 
+## CLIAR-207 tracing stack 배포 후 검증
+
+구현과 로컬 렌더링 검증은 완료되어 `STATE.md`로 이동했다. 남은 항목은 실제 dev 클러스터 반영 후 확인이 필요한 검증이다.
+
+- [ ] ArgoCD sync 후 `tempo`/`otel-collector` Application이 `Synced`/`Healthy`인지 확인
+- [ ] `kubectl -n monitoring get svc otel-collector tempo`로 Collector `4318`, Tempo `3200`/`4318` 내부 Service port 확인
+- [ ] synthetic OTLP trace를 `http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces`로 보내고 Grafana Tempo datasource에서 trace_id 조회 확인
+- [ ] Grafana datasource provisioning에서 기존 Prometheus/Loki datasource와 신규 Tempo datasource가 함께 유지되는지 확인
+- [ ] Loki 로그 상세에서 JSON `trace_id` derived field 클릭 → Tempo trace 이동 확인
+- [ ] Tempo trace 화면의 logs query가 같은 `trace_id`의 Loki 로그를 반환하는지 확인
+- [ ] backend-book/backend-auth dev overlay에 `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318` 반영 후 실제 서비스 요청 E2E 확인
+
 ## Grafana HTTPS 전환 (도메인/ACM 인증서 확보 후)
 
 ALB Ingress로 노출은 확정했지만(2026-08-26, 사용자 확인) 도메인/ACM 인증서가 없어 현재 HTTP만 열려 있다.

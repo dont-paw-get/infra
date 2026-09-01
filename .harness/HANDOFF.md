@@ -2,6 +2,20 @@
 
 세션마다 무엇을 했는지 (append-only 서술형 로그, 최신이 위). 단계별 완료 요약은 `STATE.md`, 결정 이유는 `DECISIONS.md`/`docs/adr/` 참고.
 
+## 2026-09-01 — CLIAR-207 OpenTelemetry Collector + Tempo dev tracing stack 구현
+
+사용자가 "기존 dev 모니터링 구조를 유지하면서 OpenTelemetry Collector와 Grafana Tempo를 추가" 요청. 하네스 규칙에 따라 `.harness/PLAN.md`에 초안 작성 → 사용자 "컨펌" 후 구현 진행.
+
+구현: `monitoring/tempo/values.yaml` 추가(grafana-community/tempo chart 2.3.0, single binary, PVC 5Gi `auto-ebs-sc`, local trace storage, retention 24h, ClusterIP), `monitoring/otel-collector/values.yaml` 추가(open-telemetry/opentelemetry-collector chart 0.170.0, Deployment 1 replica, inbound OTLP HTTP 4318만 노출(gRPC 4317 비활성화), traces pipeline만 활성화, `memory_limiter`/`k8sattributes`/probe filter/`batch` → Tempo OTLP HTTP 4318), `monitoring/argocd/tempo.yaml`/`otel-collector.yaml` 추가(기존 멀티소스 Helm + `targetRevision: develop`, wave 0). `fullnameOverride`로 Service DNS를 `tempo`, `otel-collector`로 고정했다.
+
+Grafana 연동: `monitoring/kube-prometheus-stack/values.yaml`에 Tempo datasource(uid `tempo`, URL `http://tempo.monitoring.svc.cluster.local:3200`) 추가. 기존 Loki datasource(uid `loki`)는 유지하면서 JSON 로그의 `"trace_id"` derived field를 Tempo 링크로 연결. Tempo `tracesToLogsV2` custom query는 `{namespace=~".+"} | json | trace_id="$${__trace.traceId}"`. `trace_id`는 Loki label로 승격하지 않았다.
+
+문서/하네스: `docs/adr/0007-otel-tempo-tracing.md` 신규 작성, `README.md`, `docs/implementation.md`, `.harness/ARCHITECTURE.md`, `.harness/STATE.md`, `.harness/PLAN.md` 갱신. 서비스 저장소 dev overlay 값은 둘 다 `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318`.
+
+검증: 전체 `monitoring/**/*.yaml` PyYAML 파싱 성공(34개), `kubectl kustomize monitoring/alerting` 렌더링 성공(일반 sandbox에서는 Access denied라 외부 권한으로 실행), Docker Helm 컨테이너(`alpine/helm:3.19.0`)로 `helm template` 성공. 렌더된 Collector Service/컨테이너 포트/receiver config는 ClusterIP 4318만 노출하고, `k8sattributes` preset 때문에 ClusterRole/ClusterRoleBinding이 `monitoring:otel-collector` ServiceAccount에 생성됨을 확인했다. Tempo config는 OTLP HTTP 4318 receiver만 endpoint가 남도록 OTLP gRPC와 Jaeger endpoint를 비웠다. Tempo Service는 ClusterIP이며 HTTP API 3200과 OTLP HTTP 4318만 실제 trace 경로로 사용한다(외부 노출 없음). `kubectl apply --dry-run=client -f monitoring/argocd`는 kubeconfig 인증 만료(`the server has asked for the client to provide credentials`)로 완료하지 못했다.
+
+다음 세션이 이어받을 것: `.harness/PLAN.md`의 "CLIAR-207 tracing stack 배포 후 검증". dev 클러스터 credential 갱신 후 ArgoCD sync, `tempo`/`otel-collector` Healthy 확인, Service port 확인, synthetic OTLP trace 전송, Grafana datasource/derived field/tracesToLogs 검증, backend-book/backend-auth dev overlay에 endpoint 반영 후 E2E 확인.
+
 ## 2026-08-29 (3) — Phase 2 시나리오 A~D 전부 검증 완료 (CLIAR-159)
 
 버그 수정(PR #6·#7)과 argocd CRD 조치가 배포된 뒤 Phase 2를 재개해 시나리오 4종을 모두 통과시켰다. 각 시나리오는 하나씩 apply → 발화 확인 → RCA 분석 확인 → delete 순으로 진행했고, 마지막에 `kubectl delete ns rca-test`로 정리했다.

@@ -1,0 +1,148 @@
+# open-telemetry/opentelemetry-collector Helm chart
+# 애플리케이션 trace만 수집해 Tempo로 전달한다. 로그는 기존 Alloy -> Loki 경로를 유지한다.
+
+fullnameOverride: otel-collector
+mode: deployment
+replicaCount: 1
+
+image:
+  repository: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s
+
+command:
+  name: otelcol-k8s
+
+presets:
+  kubernetesAttributes:
+    enabled: true
+    extractAllPodLabels: false
+    extractAllPodAnnotations: false
+
+config:
+  exporters:
+    otlphttp/tempo:
+      endpoint: http://tempo.monitoring.svc.cluster.local:4318
+  extensions:
+    health_check:
+      endpoint: ${env:MY_POD_IP}:13133
+  processors:
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+    k8sattributes:
+      auth_type: serviceAccount
+      passthrough: false
+      extract:
+        metadata:
+          - k8s.namespace.name
+          - k8s.pod.name
+          - k8s.node.name
+          - k8s.deployment.name
+      pod_association:
+        - sources:
+            - from: resource_attribute
+              name: k8s.pod.ip
+        - sources:
+            - from: connection
+    filter/probes:
+      error_mode: ignore
+      traces:
+        span:
+          - IsMatch(attributes["url.path"], "^/(health|ready|readiness|live|liveness)(/.*)?$")
+          - IsMatch(attributes["http.target"], "^/(health|ready|readiness|live|liveness)(/.*)?$")
+          - IsMatch(attributes["http.route"], "^/(health|ready|readiness|live|liveness)(/.*)?$")
+    batch:
+      timeout: 5s
+      send_batch_size: 512
+  receivers:
+    jaeger: null
+    prometheus: null
+    zipkin: null
+    otlp:
+      protocols:
+        grpc: null
+        http:
+          endpoint: ${env:MY_POD_IP}:4318
+  service:
+    extensions:
+      - health_check
+    pipelines:
+      logs: null
+      metrics: null
+      traces:
+        receivers:
+          - otlp
+        processors:
+          - memory_limiter
+          - k8sattributes
+          - filter/probes
+          - batch
+        exporters:
+          - otlphttp/tempo
+    telemetry:
+      metrics:
+        readers:
+          - pull:
+              exporter:
+                prometheus:
+                  host: ${env:MY_POD_IP}
+                  port: 8888
+
+ports:
+  # 애플리케이션 표준은 OTLP HTTP/protobuf 4318이므로 inbound gRPC 4317은 열지 않는다.
+  otlp:
+    enabled: false
+    containerPort: 4317
+    servicePort: 4317
+    protocol: TCP
+    appProtocol: grpc
+  otlp-http:
+    enabled: true
+    containerPort: 4318
+    servicePort: 4318
+    protocol: TCP
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false
+  metrics:
+    enabled: false
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+serviceMonitor:
+  enabled: false
+
+podMonitor:
+  enabled: false
+
+networkPolicy:
+  enabled: false

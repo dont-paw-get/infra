@@ -63,6 +63,8 @@ monitoring 네임스페이스
 │   └── node-exporter     노드 리소스 메트릭
 ├── Loki (Helm)           로그 저장 (S3, 14d)
 ├── Alloy (Helm)          DaemonSet — 컨테이너 stdout 수집 → Loki
+├── Tempo (Helm)          트레이스 저장·조회 (dev single binary, PVC 5Gi)
+├── OTel Collector (Helm) OTLP HTTP/protobuf 수신 → Tempo export
 └── rca-agent             알림 수신 → LLM 분석 → Discord 보고
 ```
 
@@ -84,7 +86,7 @@ monitoring 네임스페이스
 |---|---|---|
 | -2 | External Secrets Operator, StorageClass | CRD와 StorageClass가 먼저 있어야 함 |
 | -1 | ClusterSecretStore, ExternalSecret | Secret이 만들어져야 Grafana가 뜸 |
-| 0 | kube-prometheus-stack, Loki, Alloy, alerting, rca-agent | 위 두 단계에 의존 |
+| 0 | kube-prometheus-stack, Loki, Alloy, Tempo, OTel Collector, alerting, rca-agent | 위 두 단계에 의존 |
 
 3rd-party Helm 차트는 **멀티소스**로 구성한다 — 차트는 업스트림 repo에서, `values`는 이 저장소
 git 경로에서 가져온다. 차트를 벤더링하지 않아 업스트림 추적이 쉽다.
@@ -143,6 +145,61 @@ __meta_kubernetes_pod_container_name     → container
 `app` 라벨이 파드의 `app.kubernetes.io/name`에서 온다는 점이 중요하다 — 알림 규칙과 RCA Agent가
 이 라벨로 서비스를 식별한다. **애플리케이션은 stdout에 JSON 구조화 로그(`level` 필드 포함)를
 출력해야** LogQL의 `| json | level="ERROR"` 파싱이 동작한다.
+
+`trace_id`는 로그와 트레이스를 잇기 위해 JSON 필드로 남기되 Loki label로 승격하지 않는다.
+high cardinality 값이라 label로 만들면 Loki 인덱스 비용과 쿼리 부담이 커진다. Grafana는 Loki
+datasource의 derived field로 `"trace_id"`를 추출해 Tempo trace 링크를 만들고, Tempo datasource의
+`tracesToLogsV2` custom query로 같은 trace id의 로그를 다시 조회한다.
+
+`service`, `level`, `logger`, `trace_id`는 Loki label이 아니라 JSON 필드 기준으로 검색한다:
+
+```logql
+{namespace=~".+"} | json | service="backend-book" | level="ERROR"
+{namespace=~".+"} | json | trace_id="<trace-id>"
+```
+
+### 2.4.1 트레이스 (OpenTelemetry Collector + Tempo)
+
+Trace 계층은 기존 metrics/logs 경로를 바꾸지 않고 추가한다([ADR-0007](adr/0007-otel-tempo-tracing.md)).
+
+```
+backend-book / backend-auth
+    -> OTLP HTTP/protobuf :4318
+    -> OpenTelemetry Collector
+    -> Tempo
+    -> Grafana Explore
+```
+
+Collector는 `monitoring/otel-collector/values.yaml`로 배포되는 Deployment 1 replica다. Service는
+ClusterIP이며 외부 Ingress/LoadBalancer가 없다.
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318
+```
+
+Collector pipeline은 traces만 활성화한다. `memory_limiter`와 `batch`로 Collector/Tempo 지연이
+애플리케이션 요청 경로에 영향을 덜 주게 하고, `k8sattributes`로 `k8s.namespace.name`,
+`k8s.pod.name`, `k8s.node.name`, `k8s.deployment.name` resource attribute를 보강한다.
+`/health`, `/ready`, `/readiness`, `/live`, `/liveness`는 Collector filter processor에서 보완적으로
+제외하지만, probe trace는 애플리케이션 SDK에서 생성 자체를 막는 것이 1순위다.
+
+Tempo는 `monitoring/tempo/values.yaml`로 배포되는 single binary 1 replica다. dev에서는 PVC 5Gi
+(`auto-ebs-sc`) 로컬 backend와 24h retention을 사용한다. 소규모 개발/시연 환경에서 S3, Kafka,
+distributed topology는 과하므로 피했다. prod로 확장할 때는 S3/object storage, retention, topology를
+별도 ADR로 정한다.
+
+장애 시 확인 순서:
+
+```bash
+kubectl -n argocd get applications.argoproj.io tempo otel-collector
+kubectl -n monitoring get pod,svc,pvc -l app.kubernetes.io/name=tempo
+kubectl -n monitoring get pod,svc -l app.kubernetes.io/name=opentelemetry-collector
+kubectl -n monitoring logs deploy/otel-collector
+kubectl -n monitoring logs statefulset/tempo
+```
+
+Grafana에서는 datasource 목록에 Prometheus, Loki, Tempo가 함께 있어야 하고, Tempo Explore에서
+trace id 직접 조회와 `service.name=backend-book`/`service.name=backend-auth` TraceQL 검색을 확인한다.
 
 ### 2.5 알림 (Grafana Alerting)
 
@@ -570,31 +627,37 @@ Prometheus는 이미 `serviceMonitorSelectorNilUsesHelmValues: false`라 **인�
 Alloy가 이미 모든 노드의 컨테이너 stdout을 수집하므로 **서비스는 형식만 맞추면 된다**:
 
 ```json
-{"level":"ERROR","msg":"...","ts":"2026-08-29T02:07:45Z","traceId":"..."}
+{"level":"ERROR","msg":"...","ts":"2026-08-29T02:07:45Z","trace_id":"..."}
 ```
 
 - `level` 필드가 있어야 `| json | level="ERROR"` 파싱이 동작한다
 - 파드에 `app.kubernetes.io/name` 라벨이 있어야 Loki `app` 라벨이 채워진다
-- `traceId`를 함께 남기면 3단계(트레이싱)에서 로그↔트레이스 연결이 가능해진다
+- `trace_id`를 함께 남기면 3단계(트레이싱)에서 로그↔트레이스 연결이 가능해진다
 
-### 6.4 3단계 — 분산 트레이싱 (미도입)
+### 6.4 3단계 — 분산 트레이싱
 
-현재 스택에는 **트레이싱이 없다.** MSA에서 서비스 간 호출 지연이나 실패 전파를 추적하려면 필요하다.
+dev 스택에 OpenTelemetry Collector와 Tempo를 추가했다. MSA에서 서비스 간 호출 지연이나 실패 전파를 추적할 때 사용한다.
 
-검토할 구성:
+역할 구분:
 
 | 구성 요소 | 후보 | 비고 |
 |---|---|---|
-| 계측 | OpenTelemetry SDK / Java auto-instrumentation agent | 코드 변경 최소화 가능 |
-| 수집 | OpenTelemetry Collector (DaemonSet 또는 Deployment) | Alloy가 OTLP 수신도 지원해 통합 검토 가능 |
-| 저장 | **Grafana Tempo** | 같은 Grafana 생태계 — 로그·메트릭과 상관관계 탐색이 자연스러움 |
-| | Jaeger | 독립 UI. Grafana 통합 이점이 Tempo보다 적음 |
+| 계측 | OpenTelemetry SDK / Java auto-instrumentation agent | 각 서비스 저장소 책임 |
+| 수집 | OpenTelemetry Collector Deployment | OTLP HTTP `:4318`, traces pipeline만 활성화 |
+| 저장 | Grafana Tempo single binary | dev는 PVC 로컬 저장, prod는 S3/object storage 검토 |
+| 조회 | Grafana Explore | Tempo trace 조회 + Loki 로그 상관관계 |
 
-Tempo를 선택하면 Grafana 한 화면에서 **메트릭 이상 → 관련 트레이스 → 해당 트레이스의 로그**로
-드릴다운할 수 있다. 이건 RCA Agent에도 직접적인 이득이다 — 현재는 메트릭·로그 2종만 조회하는데,
-`query_tempo` 도구를 추가하면 "어느 서비스 호출에서 지연이 시작됐는지"까지 근거에 포함할 수 있다.
+서비스 저장소 dev overlay에 넣을 값:
 
-도입 시 아키텍처 수준 결정이므로 **새 ADR로 기록**한다.
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318
+```
+
+Grafana에서는 `service.name=backend-book`, `service.name=backend-auth` TraceQL 검색과 trace_id 직접
+조회가 가능해야 한다. Loki JSON 로그에 `trace_id`가 있으면 로그 상세의 TraceID 링크로 Tempo trace로
+이동하고, Tempo 화면에서는 같은 trace_id의 Loki 로그를 `tracesToLogsV2` query로 조회한다.
+
+RCA Agent 관점에서는 다음 단계로 `query_tempo` 도구를 추가하면 "어느 서비스 호출에서 지연이 시작됐는지"까지 근거에 포함할 수 있다.
 
 ### 6.5 그 외 예정 작업
 
@@ -618,6 +681,7 @@ Tempo를 선택하면 Grafana 한 화면에서 **메트릭 이상 → 관련 트
 | [ADR-0003](adr/0003-argocd-gitops.md) | ArgoCD GitOps + External Secrets |
 | [ADR-0004](adr/0004-loki-s3-storage.md) | Loki S3 전환 |
 | [ADR-0006](adr/0006-ci-access-key-revert.md) | CI → AWS 인증 방식 |
+| [ADR-0007](adr/0007-otel-tempo-tracing.md) | dev 분산 트레이싱 스택 |
 | `.harness/ARCHITECTURE.md` | 현재 구성 상태 스냅샷 |
 | `.harness/DECISIONS.md` | 운영 결정·트러블슈팅 상세 경위 |
 | `.harness/PLAN.md` | 남은 작업 |
