@@ -67,7 +67,7 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 - Contact point는 **2개로 분리**되어 있다: `discord-webhook`(사람이 보는 알림)과 `rca-agent-webhook`(RCA Agent 트리거, `http://rca-agent.monitoring.svc.cluster.local:8080/webhook`, `disableResolveMessage: true`). Grafana는 contact point 단위로 notify 성공/실패를 판정하므로 한 contact point에 두 receiver를 넣으면 rca-agent 전송 실패가 Discord 알림의 중복 재시도·드롭으로 번진다 — ADR-0002 결정 #3의 "두 경로 독립"은 분리해야만 실제로 성립한다(2026-08-29 실제 발생, `.harness/DECISIONS.md` 참고).
 - Notification policy(`monitoring/alerting/policies/notification-policy.yaml`): 루트 아래에 matcher 없는 하위 route 2개를 두어 모든 알림을 양쪽에 보낸다 — `rca-agent-webhook`(`continue: true`) → `discord-webhook`. `group_by`/타이밍은 루트에서 상속한다.
 - Rules 5종 파일 존재(`monitoring/alerting/rules/`): HTTP 5xx 에러율, p99 레이턴시, CrashLoopBackOff/OOMKilled, PVC 사용률, 로그 ERROR 급증. threshold는 모두 임시값.
-- 이 중 **HTTP 5xx 에러율/p99 레이턴시(app-level, Micrometer 메트릭 의존)는 서비스 저장소 계측 전까지 배포 제외** — `monitoring/alerting/kustomization.yaml`의 `configMapGenerator`에서 뺐다(파일은 남아있음). 나머지 3종(파드 생존/자원, 로그)만 실제 배포됨. 계측 완료 후 재추가 조건은 `.harness/PLAN.md`의 "서비스 저장소 연동" 참고.
+- 5종 **전부 `monitoring/alerting/kustomization.yaml`의 `configMapGenerator`에 등록되어 배포된다**(ConfigMap 7개 = 규칙 5 + discord + notification-policy). HTTP 5xx 에러율/p99 레이턴시는 2026-08-25~09-02 동안 서비스 저장소 계측이 없어 제외돼 있었으나, `backend-*` 5개 서비스(auth/book/librarian/record/discovery)가 Micrometer(`http_server_requests_seconds_*`, `application` 라벨) 노출 + dev overlay `ServiceMonitor`를 추가하면서 재등록했다(CLIAR-238). 5개 모두 Micrometer 표준 메트릭 이름이라 규칙 쿼리(`by (application)`, `status=~"5.."`, `_bucket` + `le`)는 수정하지 않았다 — 아래 "서비스 저장소와의 경계" 표 참고.
 - 각 규칙의 `data[]` 쿼리에는 `relativeTimeRange`(from>to)가 반드시 있어야 한다. 없으면 Grafana가 `[From: 0s, To: 0s]`로 간주해 `alerting.alert-rule.invalidRelativeTime`으로 프로비저닝 reload 전체(POST `/api/admin/provisioning/alerting/reload` → 500)를 거부한다 — contact point/notification policy만 로드되고 규칙은 0개가 된다(2026-08-29 실제 발생, `.harness/DECISIONS.md` 참고). instant 쿼리든 `__expr__`든 `from: 600, to: 0`을 둔다.
 - provisioning 배포 메커니즘: `monitoring/alerting/kustomization.yaml`(`configMapGenerator`)이 각 YAML을 `grafana_alert=1` 라벨의 ConfigMap으로 만들고, ArgoCD(`monitoring/argocd/alerting.yaml`)가 이를 동기화 → Grafana sidecar(`grafana-sc-alerts` 컨테이너)가 `/etc/grafana/provisioning/alerting/`에 쓰고 Grafana가 reload API를 호출한다.
 - 규칙이 실제 로드됐는지 확인: `curl -u admin:<pw> localhost:3000/api/v1/provisioning/alert-rules`(포트포워드 후) 가 `[]`가 아니어야 한다. Grafana 컨테이너 로그의 `logger=provisioning.alerting`/`errorMessageID=alerting.*`도 확인.
@@ -79,7 +79,7 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 
 ## RCA Agent (`monitoring/rca-agent/`)
 
-Grafana Alerting 발화(webhook)를 받아 Bedrock 기반으로 원인을 분석하고 Discord에 후속 메시지를 보고하는 read-only Agent. 결정 배경은 `docs/adr/0002-anomaly-rca-agent.md` 참고.
+Grafana Alerting 발화(webhook)를 받아 Bedrock 기반으로 원인을 분석하고 Discord에 후속 메시지를 보고하는 read-only Agent. 결정 배경은 `docs/adr/0002-anomaly-rca-agent.md`, 트레이스(Tempo) 소스 추가는 `docs/adr/0008-rca-agent-tempo-source.md` 참고.
 
 - `src/`: FastAPI 서버(`main.py`, `/webhook`)가 Grafana 알림을 받아 `analyzer.py`(Strands SDK `Agent` + Bedrock + Prometheus/Loki/Tempo 쿼리 tool)를 호출하고, 결과를 `notifier.py`가 Discord webhook으로 전송. system prompt가 알림 5종별 라벨/조사 순서를 안내하고, tool 5개를 제공한다: `query_prometheus`(instant)/`query_prometheus_range`(추세)/`query_loki`/`search_traces`(Tempo TraceQL 검색)/`get_trace`(trace_id 하나의 span 트리 요약). 각 tool은 실패해도 예외를 던지지 않고 실패 문자열을 반환(부분 실패 허용), 응답은 8000자로 truncate. `get_trace`는 Tempo `/api/traces` 원본 OTLP JSON(span당 수십 KB)을 그대로 넣지 않고 span 트리 텍스트(service/name/duration/status + 에러 span의 exception type·message)로 압축한다 — `_MAX_SPANS_RENDERED=80`, span 메시지 300자. Tempo 접근은 Prometheus/Loki와 동일하게 무인증 내부 DNS(`TEMPO_URL`=`http://tempo.monitoring.svc.cluster.local:3200`, `configmap.yaml`). k8s 이벤트/describe pod 조회는 RBAC 확장이 필요해 아직 없음(`.harness/PLAN.md` 백로그).
 - `/webhook`은 firing 알림을 `BackgroundTasks`에 넘기고 **즉시 200을 반환**한다. 분석 본체(`analyze()` + Discord 전송)는 `asyncio.to_thread`로 워커 스레드에서 돈다 — 이벤트 루프에서 직접 돌리면 Bedrock 호출(수십 초) 동안 `/healthz`가 응답하지 못해 liveness probe가 파드를 죽이고, Grafana의 webhook 전송도 타임아웃된다(2026-08-29 실제 발생). 분석이 예외로 실패하면 Discord에 "RCA 분석 실패" 메시지를 보내 실패 자체를 가시화한다.
@@ -99,6 +99,16 @@ Grafana Alerting 발화(webhook)를 받아 Bedrock 기반으로 원인을 분석
 
 - 이 저장소는 수집·저장·시각화·알림 파이프라인만 소유한다.
 - `ServiceMonitor`/`PodMonitor` CR, 메트릭 엔드포인트 노출, 구조화 로깅, OpenTelemetry SDK 설정은 각 서비스 저장소(`backend-book` 등) 책임 — 이 저장소에는 두지 않는다.
-- dev trace endpoint:
-  - backend-book: `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318`
-  - backend-auth: `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318`
+- **dev trace endpoint (전 서비스 공통):** `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, `OTEL_METRICS_EXPORTER=none`/`OTEL_LOGS_EXPORTER=none`(Collector는 traces pipeline만). `OTEL_SERVICE_NAME`은 각 서비스의 `application` 메트릭 태그·JSON 로그 `service` 필드와 동일하게 맞춘다.
+- **서비스별 `ServiceMonitor`/메트릭 현황** (2026-09-02, CLIAR-238 회신 — 각 서비스 dev overlay에만 존재, base/prod 불변). 5개 모두 Micrometer 표준(`http_server_requests_seconds_count`/`_bucket`/`_sum`, 라벨 `application`/`method`/`uri`/`status`/`outcome`)이라 `http-error-rate`/`latency` 규칙 쿼리는 무수정:
+
+  | 서비스 | `application` | ServiceMonitor (name / ns) | 메트릭 포트·경로 | 실 스크레이핑 확인 |
+  |---|---|---|---|---|
+  | backend-auth | `backend-auth` | `backend-auth` / `dpyb-auth-dev` | port `http`(8000) · `/metrics` | ❌ dev 배포 후 확인 |
+  | backend-book | `backend-book` | `backend-book` / `dpyb-book-dev` | port `metrics`(8081, 별도 관리 포트 · ALB 미노출) · `/actuator/prometheus` | ❌ dev 배포 후 확인 |
+  | backend-librarian | `backend-librarian` | `backend-librarian` / `dpyb-librarian-dev` | `/actuator/prometheus` (비-Spring, Micrometer 호환 이름) | ❌ dev 배포 후 확인 |
+  | backend-record | `backend-record` | `backend-record` / `dpyb-record-dev` | `/actuator/prometheus` (Micrometer 호환) | ❌ dev 배포 후 확인 |
+  | backend-discovery | `backend-discovery` | `backend-discovery` / `dpyb-discovery-dev` | `/actuator/prometheus` (Micrometer 모방) | ❌ dev 배포 후 확인 |
+
+  Prometheus는 `serviceMonitorSelectorNilUsesHelmValues: false`라 이 네임스페이스들의 ServiceMonitor를 라벨 제약 없이 인식한다. 배포 후 `Status > Targets`에서 `serviceMonitor/<ns>/<name>` 이 `UP`인지, Grafana에서 `http_server_requests_seconds_bucket{application="<svc>"}` 이 조회되는지 확인이 남아 있다(`.harness/PLAN.md`).
+- **미해결:** Loki 스트림 라벨 `app`(Alloy가 `app.kubernetes.io/name`에서 채움)이 각 서비스에서 `<svc>`와 일치하는지는 미확인 — `로그 ERROR 급증` 규칙이 `by (app)`로 집계하므로 서비스 파드에 `app.kubernetes.io/name: <svc>` 라벨이 필요하다. `trace_id`는 JSON 로그 필드로만 존재(라벨 승격 안 함).

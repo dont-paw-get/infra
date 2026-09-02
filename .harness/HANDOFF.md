@@ -2,6 +2,29 @@
 
 세션마다 무엇을 했는지 (append-only 서술형 로그, 최신이 위). 단계별 완료 요약은 `STATE.md`, 결정 이유는 `DECISIONS.md`/`docs/adr/` 참고.
 
+## 2026-09-02 (3) — 서비스 저장소 5곳 계측 회신 반영 + app-level 알림 재배포(B·D)
+
+사용자가 5개 서비스(backend-auth/book/librarian/record/discovery) Claude Code의 계측 구현 회신을 붙여넣음. 요지: **5곳 모두 Micrometer 표준 메트릭 이름**(`http_server_requests_seconds_count`/`_bucket`/`_sum`, 라벨 `application`/`method`/`uri`/`status`/`outcome`)이라 **알림 규칙 쿼리 수정 불필요**. 각 저장소 dev overlay에만 `ServiceMonitor` 존재(base/prod 불변). backend-book은 별도 관리 포트 `:8081/actuator/prometheus`(ALB에 `/`로 8080만 노출되므로 actuator 분리 — 앞서 사용자와 논의한 대로), backend-auth는 `:8000/metrics`. 5곳 다 아직 dev 실스크레이핑 미확인(배포 후 Prometheus Targets 확인 예정).
+
+반영(미커밋): `monitoring/alerting/kustomization.yaml`에 `http-error-rate`/`latency` configMapGenerator 재등록(`kubectl kustomize` → ConfigMap 7개 확인, 규칙 파일 무수정). `.harness/ARCHITECTURE.md` 알림 절 "배포 제외"→"5종 전부 배포", "서비스 저장소와의 경계"에 서비스별 ServiceMonitor 표(name/ns/포트/경로) + trace endpoint 공통 서술. `docs/adr/0001` "결과"에 `application` 라벨·`OTEL_SERVICE_NAME` 일치·`trace_id`/`level` 요구 구체화. `.harness/PLAN.md` B·D를 "배포 후 검증"으로 축소, "서비스 저장소 연동" 섹션 정리. `.harness/STATE.md` 갱신. `.harness/BACKLOG.md`에 prod trace endpoint 전달 항목.
+
+**다음 세션이 이어받을 것:** (1) 커밋 — A(ADR)·C(테스트)·B(알림)·D(문서). 커밋 3분할 제안은 `.harness/PLAN.md`. `scripts/aws-mfa-login.sh` 미커밋분은 앞 세션 인수인계대로 별도 판단. (2) **dev 배포 후 실측** — Prometheus `Status > Targets`에서 `serviceMonitor/dpyb-<svc>-dev/backend-<svc>` 5개 `UP`, Grafana에서 `http_server_requests_seconds_bucket{application=...}` 조회, `/api/v1/provisioning/alert-rules`에 규칙 6종·`health: ok`. (3) **Loki 라벨 `app` 확인** — 서비스 파드에 `app.kubernetes.io/name: backend-<svc>`가 있어야 `로그 ERROR 급증` 규칙(`by (app)`)이 서비스별로 집계됨. 없으면 서비스 저장소에 요청. (4) threshold(5xx 5%/p99 1s) 실측 후 튜닝.
+
+## 2026-09-02 (2) — CLIAR-238 후속: 트레이스 소스 ADR + 시나리오 테스트 손질 + app-level 알림 계획
+
+사용자가 "RCA Agent에 트레이스 추가됐는데 시나리오 테스트 손볼 것 보고"라고 요청. 조사 결과 CLIAR-238(같은 날 앞 세션, PR #11 머지)로 tool 코드는 이미 들어갔으나 (1) 그 세션이 판단한 "ADR 불필요"와 사용자 의사가 배치, (2) 시나리오 테스트에 trace 케이스 전무, (3) HTTP 5xx/p99 알림이 여전히 배포 제외임을 확인. `.harness/PLAN.md`에 초안 작성 → 사용자가 A(ADR)·B(알림)·C(테스트)·D(서비스 저장소 전달) 4덩어리로 컨펌.
+
+**사용자 결정:** 브랜치는 `CLIAR-238-RCA-Agent-Tempo-연동` 계속(이미 머지됐지만 재사용, 커밋 티켓 `CLIAR-238` 유지) / B는 옵션1(D가 dev에 반영된 뒤 머지) / D는 전체 HTTP 서비스로 확장. D의 서비스 저장소 Claude Code 전달용 명령 text는 세션 응답으로 사용자에게 전달함(메트릭: actuator/prometheus + percentiles-histogram + `application` 공통태그 + ServiceMonitor / 트레이스: OTLP endpoint·`OTEL_SERVICE_NAME`·JSON 로그 `trace_id`·`level`·probe 제외 / 베어 Bedrock ID → inference profile / 회신값 3종).
+
+**구현한 것 (A·C, 미커밋):**
+- A: `docs/adr/0008-rca-agent-tempo-source.md` 신규 — CLIAR-238을 소급 기록. Tempo 3번째 소스, `search_traces`+`get_trace`, 무인증 내부 DNS(ADR-0002 #8 연장 → IRSA/RBAC 무변경), span 트리 요약, 알림별 trace 사용 시점, `resource.service.name` ≠ `application`/`app`. 대안(raw `query_tempo` 기각, Grafana 프록시 기각). ADR-0002·0007 "결과"에 상호참조 한 줄씩, `.harness/ARCHITECTURE.md` RCA Agent 절 헤더에 ADR-0008 링크.
+- C: `test/rca-scenarios/README.md` — Phase 1 사전조건 모델 ID를 `global.anthropic.claude-sonnet-5`로 정정, Tempo 전제·"트레이스(Tempo)" 항목 신설, `http-5xx-firing` 실행 절차 추가, `{"received","queued"}` 응답 예시 정정, Phase 2 완료 반영. `test/rca-scenarios/payloads/http-5xx-firing.json` 신규(합성 payload는 trace가 없어 `search_traces` 빈 결과 → 부분 실패 허용 검증용). `test/rca-scenarios/phase2/README.md` — 5xx/p99는 서비스 계측 필요라 A~D에서 제외임을 명시, C 확인 단계에 `get_trace` 인용 여부 추가.
+- `.harness/STATE.md`에 A·C 반영, `.harness/PLAN.md`에서 A·C 제거하고 B·D만 남김.
+
+검증: 새 JSON payload 3종 `json.load` 통과. ADR/문서 변경뿐이라 helm/kustomize 렌더링 영향 없음.
+
+**다음 세션이 이어받을 것:** (1) A·C + CLIAR-238 앞 세션의 미커밋분 커밋 여부(사용자 요청 시). (2) **B는 아직 진행 불가** — D의 서비스 저장소 계측이 dev에 반영되고 `http_server_requests_seconds_*` 메트릭이 올라오는 것을 확인한 뒤 `monitoring/alerting/kustomization.yaml`에 `http-error-rate`/`latency` configMapGenerator 재추가 + ARCHITECTURE/ADR-0001 서술 갱신 + `kubectl kustomize`(ConfigMap 7개) 검증. (3) 서비스 저장소들의 회신값(ServiceMonitor 이름/ns, `application` 태그, `OTEL_SERVICE_NAME`)을 받아 Agent system prompt 라벨 매핑에 반영. (4) `scripts/aws-mfa-login.sh` 미커밋분·`--profile mfa` 표기 정정은 앞 세션 인수인계 그대로.
+
 ## 2026-09-02 — CLIAR-238 RCA Agent Tempo 연동 + trace/log correlation 분석
 
 사용자가 "trace 로그 분석해서 같은 TraceID 찾아봐" 요청 → dev(dpyb-dev) Loki/Tempo를 port-forward로 조회. AWS 자격증명이 만료돼 있어 `scripts/aws-mfa-login.sh`(신규, 미커밋)를 만들었다 — OTP 6자리만 입력받고 자격증명 값은 화면에 안 찍고 `dpgy-mfa` 프로파일에 바로 주입 + kubeconfig 갱신. **실제 프로파일명은 `dpgy-infra`(장기 키, user/kosa12) / `dpgy-mfa`(임시)** — `.harness/HANDOFF.md`·운영 메모의 `--profile mfa` 표기는 아직 안 고침(사용자 확인 대기).
