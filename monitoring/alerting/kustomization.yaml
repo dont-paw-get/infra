@@ -18,9 +18,16 @@ configMapGenerator:
   - name: grafana-alerting-notification-policy
     files:
       - policies/notification-policy.yaml
-  # grafana-alerting-http-error-rate / grafana-alerting-latency: 서비스 저장소 계측(Micrometer
-  # /actuator/prometheus + ServiceMonitor) 전까지 배포 대상에서 제외 — 대상 메트릭이 없어 NoData 알림만 발생.
-  # 계측 완료 후 재추가 (.harness/PLAN.md "서비스 저장소 연동" 참고). 규칙 파일 자체는 rules/에 남겨둠.
+  # http-error-rate / latency: backend-* 서비스가 Micrometer(http_server_requests_seconds_*)를 노출하고
+  # 각 서비스 저장소 dev overlay에 ServiceMonitor를 두면서 재추가(2026-09-02, CLIAR-238). 5개 서비스
+  # (auth/book/librarian/record/discovery) 모두 application 라벨을 붙인 Micrometer 표준 이름이라 규칙 쿼리는
+  # 수정하지 않았다 — .harness/ARCHITECTURE.md "서비스 저장소와의 경계" 표 참고.
+  - name: grafana-alerting-http-error-rate
+    files:
+      - rules/http-error-rate.yaml
+  - name: grafana-alerting-latency
+    files:
+      - rules/latency.yaml
   - name: grafana-alerting-log-error-spike
     files:
       - rules/log-error-spike.yaml
