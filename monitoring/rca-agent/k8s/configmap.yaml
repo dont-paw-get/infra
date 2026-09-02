@@ -10,3 +10,4 @@ data:
   BEDROCK_MODEL_ID: "global.anthropic.claude-sonnet-5"
   PROMETHEUS_URL: "http://prometheus-operated.monitoring.svc.cluster.local:9090"
   LOKI_URL: "http://loki-gateway.monitoring.svc.cluster.local"
+  TEMPO_URL: "http://tempo.monitoring.svc.cluster.local:3200"
