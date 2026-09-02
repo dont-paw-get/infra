@@ -2,6 +2,23 @@
 
 세션마다 무엇을 했는지 (append-only 서술형 로그, 최신이 위). 단계별 완료 요약은 `STATE.md`, 결정 이유는 `DECISIONS.md`/`docs/adr/` 참고.
 
+## 2026-09-02 — CLIAR-238 RCA Agent Tempo 연동 + trace/log correlation 분석
+
+사용자가 "trace 로그 분석해서 같은 TraceID 찾아봐" 요청 → dev(dpyb-dev) Loki/Tempo를 port-forward로 조회. AWS 자격증명이 만료돼 있어 `scripts/aws-mfa-login.sh`(신규, 미커밋)를 만들었다 — OTP 6자리만 입력받고 자격증명 값은 화면에 안 찍고 `dpgy-mfa` 프로파일에 바로 주입 + kubeconfig 갱신. **실제 프로파일명은 `dpgy-infra`(장기 키, user/kosa12) / `dpgy-mfa`(임시)** — `.harness/HANDOFF.md`·운영 메모의 `--profile mfa` 표기는 아직 안 고침(사용자 확인 대기).
+
+분석 결과: trace↔log correlation(ADR-0007)은 정상 동작. 최근 6h Loki 로그 659줄에 `trace_id` 존재, 그중 7개가 크로스 서비스. 발견한 서비스 저장소 버그(이 저장소 범위 밖, 각 레포 Claude Code에 넘길 명령문 작성해 전달):
+- **backend-librarian**: Bedrock `ConverseStream` → `UnrecognizedClientException: security token invalid`(403). 파드 AWS 자격증명 문제(static 만료 토큰이 IRSA 덮어썼을 가능성). chat 24h 전면 장애. 모델도 베어 ID `anthropic.claude-3-5-sonnet-20240620-v1:0`. 앱 로그가 `exception: null`이라 원인이 안 보였는데 **Tempo span의 exception 이벤트에 원문이 그대로** 있었다.
+- **backend-discovery**: Sonnet 5 `ValidationException` ×2 — `top_p is deprecated` / `assistant message prefill 미지원`. `[BEDROCK_FALLBACK]` 경로.
+- backend-record→auth: `users/me` 401 전파, 24h 2건, 정상 거절로 추정.
+
+이어서 사용자가 "RCA Agent에 트레이스 추가로 넣을 것" 요청 → **바로 구현**(계획 문서 절차는 사용자가 앞선 대화에서 권장 항목 리스트를 검토·승인한 것으로 갈음, 브랜치 `CLIAR-238-RCA-Agent-Tempo-연동`).
+
+구현: `monitoring/rca-agent/src/analyzer.py`에 `search_traces`(Tempo `/api/search` TraceQL)/`get_trace`(`/api/traces/<id>` → `_summarize_trace`로 span 트리 압축) tool 추가, Agent tools 3→5개, system prompt에 레이턴시/5xx/로그ERROR 시나리오별 trace 활용 + trace_id 피벗 안내. `config.py`·`k8s/configmap.yaml`에 `TEMPO_URL` 추가(무인증 내부 DNS, deployment.yaml은 `envFrom`이라 무변경). 문서: `.harness/ARCHITECTURE.md`(RCA Agent 항목), `.harness/STATE.md`, `.harness/PLAN.md`(RCA Agent 후속 개선에 배포 후 검증·trace 알림 항목 추가), `docs/implementation.md`(tool 표 3→5, 흐름도, 6.4절) 갱신. ADR는 신규 결정 없음(ADR-0007 tracing + ADR-0002 결정 #8 무인증 내부 접근 원칙의 연장) — 수정 안 함.
+
+검증: `python -m py_compile` 통과. dev Tempo에서 받은 실제 cross-service trace(73 span, exception 이벤트 포함)로 `_summarize_trace` 렌더링 확인 — librarian `UnrecognizedClientException`이 트리에 그대로 드러남, 출력 8305자→8000자 truncate. `search_traces`의 `{ status = error }` 실검색 정상. `kubectl kustomize monitoring/rca-agent/k8s`에 `TEMPO_URL` 반영 확인. 커밋은 안 함(사용자 요청 시).
+
+**다음 세션이 이어받을 것:** (1) 커밋 여부 — CLIAR-238 브랜치에 rca-agent 변경 + 문서, `scripts/aws-mfa-login.sh`는 별도 판단. (2) `.harness/PLAN.md` "Tempo 연동 배포 후 검증" — 실제 알림 발화 시 Agent가 trace를 근거에 넣는지. (3) 사용자가 원하면 HANDOFF 운영 메모의 `--profile mfa` → `dpgy-infra`/`dpgy-mfa` 정정. (4) 서비스 저장소 3건(librarian/discovery/record) 이슈는 각 레포에서 처리 — 이 저장소는 추적만.
+
 ## 2026-09-01 — CLIAR-207 OpenTelemetry Collector + Tempo dev tracing stack 구현
 
 사용자가 "기존 dev 모니터링 구조를 유지하면서 OpenTelemetry Collector와 Grafana Tempo를 추가" 요청. 하네스 규칙에 따라 `.harness/PLAN.md`에 초안 작성 → 사용자 "컨펌" 후 구현 진행.

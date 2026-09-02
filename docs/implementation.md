@@ -285,16 +285,20 @@ monitoring/rca-agent/
 └── k8s/              ServiceAccount(IRSA) / ConfigMap / Deployment / Service
 ```
 
-**Agent가 쓰는 도구 3종** (`analyzer.py`):
+**Agent가 쓰는 도구 5종** (`analyzer.py`):
 
 | 도구 | 용도 |
 |---|---|
 | `query_prometheus_range` | 발화 시점 전후 추세 — 급증인지 완만한 증가인지 |
 | `query_prometheus` | 현재 시점 값(instant) |
 | `query_loki` | 관련 로그 |
+| `search_traces` | Tempo TraceQL 검색 — 느린/실패한 trace 목록(레이턴시·5xx 알림) |
+| `get_trace` | trace_id 하나의 span 트리 요약 — 병목/실패 span, exception 메시지 |
 
-세 도구 모두 예외를 던지지 않고 **실패 문자열을 반환**한다. 하나가 실패해도 분석 전체가 죽지 않고,
+모든 도구가 예외를 던지지 않고 **실패 문자열을 반환**한다. 하나가 실패해도 분석 전체가 죽지 않고,
 "이 조회는 실패했다"를 근거에 포함해 보고서를 쓴다. 응답은 8000자로 truncate해 토큰 낭비를 막는다.
+`get_trace`는 Tempo 원본 JSON(span 하나에 수십 KB)을 그대로 넣지 않고 span 트리 텍스트로 압축한다 —
+service/name/소요시간/status와 에러 span의 exception type·message만 남긴다.
 
 system prompt는 알림 종류별로 **어떤 라벨을 보고 어떤 순서로 조사할지** 안내한다.
 Prometheus 알림 라벨(`application`)과 Loki 라벨(`app`)이 다르다는 점을 명시해 혼동을 방지한다.
@@ -359,7 +363,9 @@ monitoring/** 변경이 develop에 push
                                    → 백그라운드 스레드에서 분석 시작
                                       ├ query_prometheus_range (추세)
                                       ├ query_loki            (로그)
-                                      └ query_prometheus      (현재값)
+                                      ├ query_prometheus      (현재값)
+                                      ├ search_traces         (Tempo 검색)
+                                      └ get_trace             (span 트리)
                                    → Bedrock(Claude Sonnet 5)이 근거 종합
                                       ↓
                               ⑦ Discord에 "RCA: <알림명>" 후속 메시지
@@ -657,7 +663,9 @@ Grafana에서는 `service.name=backend-book`, `service.name=backend-auth` TraceQ
 조회가 가능해야 한다. Loki JSON 로그에 `trace_id`가 있으면 로그 상세의 TraceID 링크로 Tempo trace로
 이동하고, Tempo 화면에서는 같은 trace_id의 Loki 로그를 `tracesToLogsV2` query로 조회한다.
 
-RCA Agent 관점에서는 다음 단계로 `query_tempo` 도구를 추가하면 "어느 서비스 호출에서 지연이 시작됐는지"까지 근거에 포함할 수 있다.
+RCA Agent는 이 trace를 `search_traces`(TraceQL 검색) / `get_trace`(span 트리 요약) 도구로 조회한다 —
+레이턴시 알림이면 `{ resource.service.name="<svc>" && duration > <threshold> }`로 느린 요청을 찾아 병목 span을,
+5xx·ERROR 알림이면 로그의 `trace_id`나 `{ status = error }` 검색으로 실패 span의 exception 메시지를 근거로 삼는다.
 
 ### 6.5 그 외 예정 작업
 
