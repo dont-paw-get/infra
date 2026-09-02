@@ -33,6 +33,7 @@
 - 서비스 저장소는 다음 endpoint를 dev overlay에 설정한다:
   - `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318`
 - Grafana Explore에서 Tempo trace 조회와 Loki trace_id 기반 trace 링크 이동이 가능해진다.
+- RCA Agent가 이 Tempo 백엔드를 `search_traces`/`get_trace` tool로 직접 조회한다 (2026-09-02, CLIAR-238) — `docs/adr/0008-rca-agent-tempo-source.md` 참고.
 
 ## 미결정
 

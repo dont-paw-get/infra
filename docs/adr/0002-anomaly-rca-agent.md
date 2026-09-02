@@ -43,6 +43,7 @@
 - IRSA `ServiceAccount`(`rca-agent-irsa`) + IAM Role(`dpgy-infra-rca-agent`) 생성 완료(2026-08-25, AWS Console). 신뢰 정책은 `sub: system:serviceaccount:monitoring:rca-agent-irsa`로 좁혔다. 권한은 처음 `foundation-model/anthropic.claude-sonnet-5`로 스코프했으나, 2026-08-28 실제 호출에서 Sonnet 5가 베어 모델 ID on-demand 호출을 거부(`ValidationException`)해 **inference profile 방식으로 전환**했다 — `bedrock:InvokeModel(WithResponseStream)`을 `inference-profile/global.anthropic.claude-sonnet-5`와 라우팅 대상 `arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5`로 스코프.
 - Bedrock 모델 ID는 **inference profile `global.anthropic.claude-sonnet-5`**(`monitoring/rca-agent/k8s/configmap.yaml`의 `BEDROCK_MODEL_ID`). `ap-northeast-2`에 `apac.` 프로파일이 없어 `global.`(전 리전 라우팅) 하나뿐이다. 경위는 `.harness/DECISIONS.md` 2026-08-28 항목 참고.
 - Agent는 클러스터 쓰기 권한이 없으므로, 자동 조치가 필요한 경우는 이번 범위에서 제외되며 향후 별도 ADR로 재검토한다.
+- Agent가 조회하는 소스에 **Tempo(분산 추적)가 추가**되었다 (2026-09-02, CLIAR-238). 결정 #8의 무인증 내부 접근 원칙을 Tempo로 연장한 것으로, 배경·대안은 `docs/adr/0008-rca-agent-tempo-source.md` 참고.
 
 ## 미결정 (추후 논의 필요)
 

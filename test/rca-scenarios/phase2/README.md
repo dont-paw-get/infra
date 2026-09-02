@@ -34,6 +34,11 @@ kubectl apply -f test/rca-scenarios/phase2/namespace.yaml
 | C | `C-log-error-spike.yaml` | 로그 ERROR 급증 | ~5-6분 |
 | D | `D-pvc-usage.yaml` | PVC 사용률 초과 | ~15-20분 |
 
+> `HTTP 5xx 에러율 초과` / `p99 레이턴시 초과` 알림은 여기에 없다 — 두 규칙은 서비스 저장소의
+> Micrometer 계측(`http_server_requests_seconds_*`)과 `ServiceMonitor`가 있어야 발화하고,
+> 그때 Agent가 `search_traces`/`get_trace`로 trace를 근거에 넣는지 확인하는 시나리오를 별도로 추가한다.
+> 현재는 `monitoring/alerting/kustomization.yaml`에서 배포 제외 상태 — `.harness/PLAN.md` 참고.
+
 각 시나리오:
 
 ```
@@ -46,6 +51,8 @@ kubectl apply -f test/rca-scenarios/phase2/<파일>
 # Discord 확인:
 #  1) 원본 알림 임베드 도착
 #  2) "RCA: <알림명>" 임베드 도착 — 내용이 실제 재시작 카운트 / 에러 로그 / PVC 추세를 인용하는지
+#     C(로그 ERROR 급증): 에러 로그에 trace_id가 있으면 Agent가 get_trace를 호출해
+#     span exception을 근거에 넣는지도 확인 (로그가 trace_id를 담을 때만)
 
 # 확인 끝나면 즉시
 kubectl delete -f test/rca-scenarios/phase2/<파일>
