@@ -2,6 +2,8 @@
 # datasourceUid "prometheus"는 kube-prometheus-stack이 자동 생성하는 기본 Prometheus 데이터소스의 uid다.
 # 대상 메트릭(http_server_requests_seconds_count)은 Micrometer 기준 이름 — 서비스가 다른 클라이언트를 쓰면 조정 필요.
 # TODO(open issue, ADR-0001): threshold(0.05 = 5%)는 러프한 초기값. 트래픽 파악 후 튜닝.
+# refId A의 `and sum(rate(count[5m])) by (application) >= 0.2`는 최소 트래픽 게이트다(CLIAR-261).
+# 5분에 60건(0.2 req/s) 미만인 서비스는 5xx 1건만으로 에러율이 급등하므로 평가에서 제외한다.
 apiVersion: 1
 
 groups:
@@ -22,9 +24,13 @@ groups:
             datasourceUid: prometheus
             model:
               expr: |
-                sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (application)
-                /
-                sum(rate(http_server_requests_seconds_count[5m])) by (application)
+                (
+                  sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (application)
+                  /
+                  sum(rate(http_server_requests_seconds_count[5m])) by (application)
+                )
+                and
+                sum(rate(http_server_requests_seconds_count[5m])) by (application) >= 0.2
               instant: true
           - refId: C
             relativeTimeRange:
@@ -38,7 +44,7 @@ groups:
                 - evaluator:
                     type: gt
                     params: [0.05]
-        noDataState: NoData
+        noDataState: OK
         execErrState: Error
         labels:
           severity: warning

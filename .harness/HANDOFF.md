@@ -2,6 +2,22 @@
 
 세션마다 무엇을 했는지 (append-only 서술형 로그, 최신이 위). 단계별 완료 요약은 `STATE.md`, 결정 이유는 `DECISIONS.md`/`docs/adr/` 참고.
 
+## 2026-09-03 (2) — CLIAR-207·254 배포 후 실측 + CLIAR-261 p99/5xx 최소 트래픽 게이트
+
+CLIAR-238 실측(같은 날 앞 항목, 별도 브랜치 `CLIAR-238-app-level-알림-실측-반영`) 이어서. 사용자가 PLAN의 CLIAR-207(tracing 스택)·CLIAR-254(OOM 규칙+Tempo 메모리) "배포 후 검증"을 둘 다 실측 요청.
+
+**CLIAR-254 — 전부 통과:** `tempo-0` limit 1Gi/request 512Mi로 재기동·`restarts=0`·01:23:49부터 안정. `pod-oom-killed` 규칙 `health: ok`(게이트 `and on ...` 쿼리 파싱 OK)·`noDataState: OK`·`for: 0s`. `kube_pod_container_status_last_terminated_timestamp` KSM 노출 확인(폴백 불필요). 09-02 tempo-0 OOM 알림은 재기동 15분 후 `state: inactive`(인스턴스 `Normal (NoData)`)로 자동 해소.
+
+**CLIAR-207 — 전부 통과:** `tempo`/`otel-collector` app Synced/Healthy. svc `otel-collector` `4318`, `tempo` `3200`(+차트 기본 9411/55680/55681/4318 — STATE의 "4318만 노출"은 렌더 기준, 라이브는 기본 리시버 포트도 열림, 무해). Grafana 데이터소스 Prometheus/Loki/Tempo 공존. synthetic OTLP trace `POST otel-collector:4318/v1/traces`→200→Tempo `/api/search` 조회 성공. Tempo `service.name` 태그값에 backend-auth/book/librarian/record/discovery **5개 전부** = 실서비스 trace E2E 동작. Loki `TraceID` derived field·Tempo `tracesToLogsV2` 확인, Loki 실 trace_id가 Tempo `/api/traces/`에서 200.
+
+**부수 발견 → CLIAR-261로 처리:** `p99 레이턴시 초과` 규칙이 idle 서비스(backend-discovery)에 `Pending`. 트래픽이 적으면 느린 요청 1건이 5분 윈도우 p99를 통째로 끌어올림. 5xx 에러율도 동일 취약. 사용자에게 설명 후 "2번 방식(최소 트래픽 게이트)"으로 고치기로 결정. 사용자가 티켓 261로 브랜치 `CLIAR-261-p99-레이턴시-초과-설정-완화`를 develop에서 새로 만들어 전환.
+
+**CLIAR-261 구현(이 브랜치):** `monitoring/alerting/rules/latency.yaml`·`http-error-rate.yaml` 두 규칙 refId A에 `and sum(rate(http_server_requests_seconds_count[5m])) by (application) >= 0.2` 게이트 추가(5xx는 division을 괄호로 묶음), 두 규칙 `noDataState: NoData`→`OK`. 규칙 파일 상단에 CLIAR-261 주석. 검증: `kubectl kustomize monitoring/alerting` ConfigMap 7개 유지·쿼리 반영, 두 게이트 쿼리를 라이브 Prometheus에 실행 `status: success`(현재 전 서비스 `<0.2 req/s`라 빈 결과 = 의도대로).
+
+**커밋(이 브랜치, `CLIAR-261-...`):** 규칙 2파일 + `.harness/STATE.md`(CLIAR-207·254 실측 완료 + CLIAR-261 항목) + `.harness/PLAN.md`(CLIAR-207·254 배포 후 검증 섹션 제거, "알림 규칙 튜닝"에 CLIAR-261 항목) + `.harness/ARCHITECTURE.md`(알림 절 최소 트래픽 게이트 서술) + 이 HANDOFF. CLIAR-238 실측 문서 변경은 별도 브랜치 `CLIAR-238-app-level-알림-실측-반영`에 커밋됨(별도 PR).
+
+**다음 세션이 이어받을 것:** (1) 두 브랜치 각각 PR → develop 머지(HANDOFF.md prepend가 겹쳐 2번째 머지 시 사소한 충돌 가능 — 트리비얼). (2) 머지 후 `grafana-alerting` sync → 두 규칙 `health: ok`, 게이트 동작, `DatasourceNoData` 미발생 확인. (3) 게이트값 0.2·threshold는 실트래픽 쌓인 뒤 튜닝.
+
 ## 2026-09-02 (3) — 서비스 저장소 5곳 계측 회신 반영 + app-level 알림 재배포(B·D)
 
 사용자가 5개 서비스(backend-auth/book/librarian/record/discovery) Claude Code의 계측 구현 회신을 붙여넣음. 요지: **5곳 모두 Micrometer 표준 메트릭 이름**(`http_server_requests_seconds_count`/`_bucket`/`_sum`, 라벨 `application`/`method`/`uri`/`status`/`outcome`)이라 **알림 규칙 쿼리 수정 불필요**. 각 저장소 dev overlay에만 `ServiceMonitor` 존재(base/prod 불변). backend-book은 별도 관리 포트 `:8081/actuator/prometheus`(ALB에 `/`로 8080만 노출되므로 actuator 분리 — 앞서 사용자와 논의한 대로), backend-auth는 `:8000/metrics`. 5곳 다 아직 dev 실스크레이핑 미확인(배포 후 Prometheus Targets 확인 예정).

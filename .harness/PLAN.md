@@ -3,27 +3,6 @@
 아직 끝나지 않은 계획과 체크리스트만 남긴다. 완료되면 항목을 지우고 `.harness/STATE.md`에 단계 한 줄로 반영한다.
 배경/근거는 각 항목에 표시된 파일 참고 (주로 `docs/adr/0001-observability-stack.md`).
 
-## CLIAR-207 tracing stack 배포 후 검증
-
-구현과 로컬 렌더링 검증은 완료되어 `STATE.md`로 이동했다. 남은 항목은 실제 dev 클러스터 반영 후 확인이 필요한 검증이다.
-
-- [ ] ArgoCD sync 후 `tempo`/`otel-collector` Application이 `Synced`/`Healthy`인지 확인
-- [ ] `kubectl -n monitoring get svc otel-collector tempo`로 Collector `4318`, Tempo `3200`/`4318` 내부 Service port 확인
-- [ ] synthetic OTLP trace를 `http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces`로 보내고 Grafana Tempo datasource에서 trace_id 조회 확인
-- [ ] Grafana datasource provisioning에서 기존 Prometheus/Loki datasource와 신규 Tempo datasource가 함께 유지되는지 확인
-- [ ] Loki 로그 상세에서 JSON `trace_id` derived field 클릭 → Tempo trace 이동 확인
-- [ ] Tempo trace 화면의 logs query가 같은 `trace_id`의 Loki 로그를 반환하는지 확인
-- [ ] backend-book/backend-auth dev overlay에 `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318` 반영 후 실제 서비스 요청 E2E 확인
-
-## CLIAR-254 OOMKilled 알림 수정 + Tempo 메모리 상향 배포 후 검증
-
-구현·로컬 검증 완료(`STATE.md`). 남은 건 dev 반영 후 확인.
-
-- [ ] `grafana-alerting` ArgoCD app sync 후 `pod-oom-killed` 규칙이 `health: ok`로 로드되는지(새 `and on ...` 쿼리가 파싱 에러 없이) 확인
-- [ ] `kube_pod_container_status_last_terminated_timestamp` 메트릭이 클러스터 KSM에서 노출되는지 확인(`curl` Prometheus `/api/v1/query`) — 없으면 `rate(kube_pod_container_status_restarts_total[15m]) > 0` AND 방식으로 대체
-- [ ] `tempo-0`가 OOM된 지 15분+ 경과 후 `파드 OOMKilled` 알림이 자동 해소(resolved)되는지 Discord/Grafana에서 확인
-- [ ] `tempo` ArgoCD app sync 후 `tempo-0`가 limit 1Gi로 재기동(`kubectl -n monitoring get pod tempo-0 -o jsonpath='{.spec.containers[0].resources}'`)되고 Running 안정 확인
-
 ## app-level 알림 재배포 배포 후 검증 (CLIAR-238 브랜치 계속)
 
 **배경:** CLIAR-238로 RCA Agent trace tool·트레이스 소스 ADR(`docs/adr/0008`)·시나리오 테스트 손질(A·C)
@@ -73,7 +52,17 @@ ALB Ingress로 노출은 확정했지만(2026-08-26, 사용자 확인) 도메인
 
 ## 알림 규칙 튜닝
 
-- [ ] 트래픽 규모 파악 후 threshold 재조정 (현재 러프한 초기값):
+### p99 / 5xx 최소 트래픽 게이트 — 배포 후 검증 (CLIAR-261, 구현 완료)
+
+구현·로컬 검증 완료(`STATE.md`). 브랜치 `CLIAR-261-p99-레이턴시-초과-설정-완화`. 남은 건 dev 반영 후 확인.
+
+- [ ] `grafana-alerting` sync 후 `http-p99-latency`/`http-5xx-error-rate` 규칙이 `health: ok`로 로드되는지(게이트 `and` 쿼리 파싱)
+- [ ] 트래픽 `< 0.2 req/s`인 서비스가 두 규칙 평가에서 빠지고 `DatasourceNoData` 알림이 안 뜨는지(`noDataState: OK`)
+- [ ] 실트래픽(`>= 0.2 req/s`)이 붙은 서비스에서는 정상 평가되는지
+
+### 그 외 threshold 재조정 (트래픽 규모 파악 후)
+
+- [ ] 러프한 초기값 재조정 (게이트값 `0.2 req/s` 포함):
   - `monitoring/alerting/rules/http-error-rate.yaml` — 5xx 에러율 5%
   - `monitoring/alerting/rules/latency.yaml` — p99 레이턴시 1초
   - `monitoring/alerting/rules/pvc-usage.yaml` — PVC 사용률 85%
