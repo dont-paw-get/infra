@@ -51,8 +51,13 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
+              # last_terminated_reason는 파드가 복구·Running이어도 파드 오브젝트가 살아있는 한
+              # 계속 1을 유지하므로, last_terminated_timestamp로 최근 15분 내 OOM 종료만 발화하도록 바운드한다.
+              # 반복 OOM이면 timestamp가 갱신되며 재발화하고, 복구 후 15분이 지나면 series가 비어 자동 해소된다.
               expr: |
-                kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+                (kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1)
+                and on (namespace, pod, container)
+                (time() - kube_pod_container_status_last_terminated_timestamp < 900)
               instant: true
           - refId: C
             relativeTimeRange:

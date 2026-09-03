@@ -121,3 +121,10 @@
   - `.harness/ARCHITECTURE.md`: 알림 절 "배포 제외" 서술 → "5종 전부 배포"로 갱신, "서비스 저장소와의 경계"에 서비스별 ServiceMonitor/메트릭 현황 표 추가(name/ns/포트/경로 — auth는 `:8000/metrics`, book은 별도 관리 포트 `:8081/actuator/prometheus`, 나머지 3종 `/actuator/prometheus`). trace endpoint를 전 서비스 공통으로 통합 서술
   - `docs/adr/0001` "결과": 알림 규칙이 요구하는 `application` 라벨·`OTEL_SERVICE_NAME` 일치·`trace_id`/`level` 로그 필드를 구체화
   - 미검증(dev 배포 후): Prometheus Targets에서 5개 ServiceMonitor `UP`, 규칙 6종 `health: ok`, Loki 스트림 라벨 `app`이 `<svc>`로 잡히는지(`app.kubernetes.io/name` 라벨 필요) — `.harness/PLAN.md`
+- [x] `파드 OOMKilled` 알림 오발화 수정 + Tempo dev 메모리 상향 (2026-09-03, CLIAR-254) — `tempo-0`가 2026-09-02 1회 OOM 후 하루 넘게 안정 Running인데도 알림이 계속 firing한 문제
+  - 원인 1(안 꺼짐): `pod-oom-killed` 규칙이 `kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}==1`만 봤는데 이 게이지는 파드 오브젝트가 살아있는 한 계속 1을 유지 → 한 번 OOM되면 파드 삭제 전까지 영구 firing
+  - 원인 2(애초에 OOM): `monitoring/tempo/values.yaml` limit 512Mi + `memBallastSizeMbs: 128` → single-binary 실작업 가용분 ~384Mi로 빠듯
+  - 수정 A: `monitoring/alerting/rules/pod-health.yaml` `pod-oom-killed` refId A에 `and on (namespace, pod, container) (time() - kube_pod_container_status_last_terminated_timestamp < 900)` 추가 → 최근 15분 내 OOM 종료만 발화, 복구 15분 후 series가 비어 `noDataState: OK`로 자동 해소, 반복 OOM은 timestamp 갱신으로 재발화
+  - 수정 B: `monitoring/tempo/values.yaml` `resources` — request 256Mi→512Mi, limit 512Mi→1Gi. `memBallastSizeMbs: 128` 유지(→`GOMEMLIMIT` 전환은 `.harness/BACKLOG.md`)
+  - 검증: `kubectl kustomize monitoring/alerting`로 ConfigMap 7개 유지 + `pod-health` ConfigMap에 새 쿼리 반영 확인, tempo values `helm template` 렌더링 확인, YAML 문법 검증
+  - 미검증(dev 배포 후): 배포 후 알림이 자동 해소되는지, `kube_pod_container_status_last_terminated_timestamp` 메트릭이 클러스터 KSM에서 노출되는지, tempo-0가 1Gi로 재기동되는지 — `.harness/PLAN.md`
