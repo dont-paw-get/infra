@@ -15,6 +15,15 @@
 - [ ] Tempo trace 화면의 logs query가 같은 `trace_id`의 Loki 로그를 반환하는지 확인
 - [ ] backend-book/backend-auth dev overlay에 `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318` 반영 후 실제 서비스 요청 E2E 확인
 
+## CLIAR-254 OOMKilled 알림 수정 + Tempo 메모리 상향 배포 후 검증
+
+구현·로컬 검증 완료(`STATE.md`). 남은 건 dev 반영 후 확인.
+
+- [ ] `grafana-alerting` ArgoCD app sync 후 `pod-oom-killed` 규칙이 `health: ok`로 로드되는지(새 `and on ...` 쿼리가 파싱 에러 없이) 확인
+- [ ] `kube_pod_container_status_last_terminated_timestamp` 메트릭이 클러스터 KSM에서 노출되는지 확인(`curl` Prometheus `/api/v1/query`) — 없으면 `rate(kube_pod_container_status_restarts_total[15m]) > 0` AND 방식으로 대체
+- [ ] `tempo-0`가 OOM된 지 15분+ 경과 후 `파드 OOMKilled` 알림이 자동 해소(resolved)되는지 Discord/Grafana에서 확인
+- [ ] `tempo` ArgoCD app sync 후 `tempo-0`가 limit 1Gi로 재기동(`kubectl -n monitoring get pod tempo-0 -o jsonpath='{.spec.containers[0].resources}'`)되고 Running 안정 확인
+
 ## app-level 알림 재배포 배포 후 검증 (CLIAR-238 브랜치 계속)
 
 **배경:** CLIAR-238로 RCA Agent trace tool·트레이스 소스 ADR(`docs/adr/0008`)·시나리오 테스트 손질(A·C)

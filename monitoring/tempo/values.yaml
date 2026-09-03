@@ -12,10 +12,12 @@ tempo:
   resources:
     requests:
       cpu: 50m
-      memory: 256Mi
+      memory: 512Mi
     limits:
       cpu: 300m
-      memory: 512Mi
+      # single binary(distributor+ingester+querier+compactor 한 프로세스) + memBallast 128Mi를
+      # 감안하면 512Mi로는 trace 유입이 조금만 늘어도 OOM된다(2026-09-02 tempo-0 OOMKilled 실발생).
+      memory: 1Gi
 
   storage:
     trace:

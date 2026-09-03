@@ -51,6 +51,7 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 - `/health`, `/ready`, `/readiness`, `/live`, `/liveness` path는 Collector filter processor에서 보완적으로 제외한다. 우선순위는 여전히 애플리케이션 SDK에서 probe trace 생성 자체를 막는 것이다.
 - Grafana Tempo(`tempo`)는 dev용 single binary 1 replica다. Tempo HTTP API는 `http://tempo.monitoring.svc.cluster.local:3200`, Collector export는 내부 OTLP HTTP `http://tempo.monitoring.svc.cluster.local:4318`을 사용한다. Tempo gRPC `4317`은 열지 않는다.
 - Tempo dev storage는 PVC 5Gi(`auto-ebs-sc`) 로컬 backend이며 retention은 24h다. prod 확장 시 S3/object storage, retention, topology는 별도 ADR로 재검토한다.
+- Tempo 리소스: request 512Mi / limit 1Gi(`monitoring/tempo/values.yaml`). 초기값 512Mi는 single-binary(distributor+ingester+querier+compactor 한 프로세스) + `memBallastSizeMbs: 128` 조합에서 trace 유입이 조금만 늘어도 OOM됐다(2026-09-02 `tempo-0` OOMKilled 실발생, CLIAR-254로 상향). 밸러스트 제거+`GOMEMLIMIT` 전환은 `.harness/BACKLOG.md`.
 
 ## Grafana
 
@@ -71,6 +72,7 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 - 각 규칙의 `data[]` 쿼리에는 `relativeTimeRange`(from>to)가 반드시 있어야 한다. 없으면 Grafana가 `[From: 0s, To: 0s]`로 간주해 `alerting.alert-rule.invalidRelativeTime`으로 프로비저닝 reload 전체(POST `/api/admin/provisioning/alerting/reload` → 500)를 거부한다 — contact point/notification policy만 로드되고 규칙은 0개가 된다(2026-08-29 실제 발생, `.harness/DECISIONS.md` 참고). instant 쿼리든 `__expr__`든 `from: 600, to: 0`을 둔다.
 - provisioning 배포 메커니즘: `monitoring/alerting/kustomization.yaml`(`configMapGenerator`)이 각 YAML을 `grafana_alert=1` 라벨의 ConfigMap으로 만들고, ArgoCD(`monitoring/argocd/alerting.yaml`)가 이를 동기화 → Grafana sidecar(`grafana-sc-alerts` 컨테이너)가 `/etc/grafana/provisioning/alerting/`에 쓰고 Grafana가 reload API를 호출한다.
 - 규칙이 실제 로드됐는지 확인: `curl -u admin:<pw> localhost:3000/api/v1/provisioning/alert-rules`(포트포워드 후) 가 `[]`가 아니어야 한다. Grafana 컨테이너 로그의 `logger=provisioning.alerting`/`errorMessageID=alerting.*`도 확인.
+- `pod-oom-killed` 규칙은 최근성 바운드를 갖는다: `kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}`는 파드 오브젝트가 살아있는 한 계속 1이라, `and on (namespace, pod, container) (time() - kube_pod_container_status_last_terminated_timestamp < 900)`로 최근 15분 내 OOM 종료만 발화하도록 제한한다(2026-09-02 `tempo-0`가 하루 넘게 정상 Running인데도 계속 firing한 문제, CLIAR-254). 복구 15분 후 series A가 비어 `noDataState: OK`로 자동 해소되고, 반복 OOM은 timestamp가 갱신되며 재발화한다.
 
 ## 시크릿
 

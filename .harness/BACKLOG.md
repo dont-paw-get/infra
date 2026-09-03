@@ -8,3 +8,4 @@
 - ~~**`argocd/argocd-applicationset-controller` CrashLoopBackOff**~~ → 2026-08-29 해결(`applicationsets.argoproj.io` CRD 누락, `.harness/DECISIONS.md` 참고). ArgoCD 설치 자체를 client-side apply로 했을 때 큰 CRD가 annotation 한도로 누락될 수 있다는 사례 — ArgoCD 재설치·업그레이드 시 `--server-side`를 쓰는지 확인할 것
 - **StorageClass 변경 시 StatefulSet 수동 삭제 절차 문서화** — `volumeClaimTemplates`가 불변이라 git만 고쳐서는 절대 반영되지 않는다(Loki에서 2회 발생). 스토리지 관련 values를 바꿀 때 따라야 할 절차를 `README.md`나 runbook으로 남길지 검토
 - **prod 트레이스 endpoint 전달** — `backend-book` 등 서비스 저장소의 prod overlay는 `OTEL_EXPORTER_OTLP_ENDPOINT`를 관례 기본값(`http://opentelemetry-collector.observability.svc.cluster.local:4318`)으로 두고 있다. prod 클러스터에 Collector가 배포되면(prod overlay 설계, ADR-0007 미결정) 실제 서비스 DNS를 각 서비스 저장소에 전달해야 한다. 이 저장소는 dev tracing 스택만 소유
+- **Tempo 밸러스트 → `GOMEMLIMIT` 전환** — `monitoring/tempo/values.yaml`의 `memBallastSizeMbs: 128`은 Go 1.19+ `GOMEMLIMIT`로 대체하는 것이 최신 권장이다. 메모리 상향(CLIAR-254, 512Mi→1Gi)으로 당장 급하지 않아 보류. prod topology(ADR-0007 미결정)와 함께 다룬다
