@@ -12,4 +12,4 @@ resources:
 # .github/workflows/rca-agent-build-push.yml이 빌드 후 newTag를 커밋 SHA로 갱신한다 (GitOps).
 images:
   - name: 594532711953.dkr.ecr.ap-northeast-2.amazonaws.com/dpgy-infra-rca-agent
-    newTag: 62c757896f39edfee8d3e50865d8bd52966b6c0c
+    newTag: dd690028cdb0cb381750cc315e5b882f241783a7
