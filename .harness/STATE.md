@@ -135,3 +135,10 @@
   - 두 규칙 `noDataState: NoData` → `OK` — 게이트로 전 서비스가 빠져 refId A가 비면 `NoData`는 `DatasourceNoData` 알림을 낸다(과거 실제 발생). "트래픽 없음 = 알림 없음"이 맞음. CLIAR-254 OOM 규칙과 동일 처리
   - 게이트값 `0.2 req/s`·threshold(p99 1s / 5xx 5%)는 실트래픽 분포 확인 후 튜닝 대상 — 규칙 파일 주석·`.harness/PLAN.md`
   - 검증: `kubectl kustomize monitoring/alerting` ConfigMap 7개 유지·쿼리 반영 확인, 두 게이트 쿼리를 라이브 Prometheus `/api/v1/query`에 실행 `status: success`(현재는 전 서비스 `< 0.2 req/s`라 빈 결과 = 의도대로). 배포 후 검증은 `.harness/PLAN.md`
+- [x] 알림 threshold를 SLO 기준으로 1차 재조정 (2026-09-03, 브랜치 `alerting-threshold-SLO-재조정`, Jira 티켓 없음) — dev 실측이 전 서비스 idle(`< 0.2 req/s`)이라 경험적 튜닝 불가, 사용자 결정으로 SLO/목표값 관점 정리. 경위·표는 `.harness/DECISIONS.md` 2026-09-03
+  - `http-error-rate.yaml`: 5xx 에러율 `5% → 2%`, 게이트 `0.2 → 0.5 req/s`
+  - `latency.yaml`: p99 `1s` 유지, 쿼리에 `application!~"backend-librarian|backend-discovery"` 추가(Bedrock 경로 섞여 상시 수 초 → 오탐 제거), 게이트 `0.2 → 0.5 req/s`. 두 서비스 일반 API 레이턴시용 URI 단위 SLO 규칙은 미구현(`.harness/PLAN.md`)
+  - `pvc-usage.yaml`: 단일 `85%` → warning `80%`/`for 10m` + critical `90%`/`for 5m` 2단계(rule 2개, `pvc-usage-critical` uid 신규)
+  - `log-error-spike.yaml`: 5분 윈도우 `5건 → 10건`, "분당 5건" 주석/실제값 불일치 정정
+  - 동반 갱신: `.harness/ARCHITECTURE.md` 알림 절(threshold·게이트 서술값, p99 제외 서비스), `docs/adr/0001` 미결정 항목, `.harness/DECISIONS.md`
+  - 검증: `kubectl kustomize monitoring/alerting` ConfigMap 7개 유지, `python yaml.safe_load`로 규칙 7개 파싱·threshold 값 확인. 배포 후 검증은 `.harness/PLAN.md`

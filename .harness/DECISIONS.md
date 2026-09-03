@@ -2,6 +2,22 @@
 
 `docs/adr/`에 없는 소규모/운영 결정의 역사 (append-only, 최신이 위). 아키텍처 수준 결정(스택 선정, 호스팅 방식 등)은 여기가 아니라 `docs/adr/`에 기록한다.
 
+## 2026-09-03 — 알림 threshold를 SLO 기준으로 1차 재조정
+
+2026-09-03 dev 실측에서 전 서비스가 `< 0.2 req/s`(idle)라 경험적 백분위 튜닝을 할 트래픽이 없었다. 사용자 결정에 따라 러프한 초기값을 **SLO/목표값 관점**으로 정리했다(경험값 보정은 실트래픽 확보 후 별도 — `.harness/PLAN.md` "실측 후 재검증"). Jira 티켓 없이 브랜치 `alerting-threshold-SLO-재조정`에서 진행.
+
+| 규칙 | 이전 | 이후 | 근거 |
+|---|---|---|---|
+| 5xx 에러율 (`http-error-rate.yaml`) | `> 5%` | `> 2%` | 99.9% 가용성 목표 대비 5%는 예산을 한참 넘긴 뒤에야 발화 |
+| p99 레이턴시 (`latency.yaml`) | `> 1s`, 전 서비스 | `> 1s`, **backend-librarian·backend-discovery 제외** | 두 서비스는 Bedrock 호출 경로가 섞여 `application` 단위 p99가 상시 수 초 → 상시 오탐. 일반 API 레이턴시는 URI 단위 SLO 규칙으로 분리(미구현) |
+| PVC 사용률 (`pvc-usage.yaml`) | `> 85%` 단일 warning | warning `> 80%`/`for 10m` + critical `> 90%`/`for 5m` (rule 2개) | EBS 확장은 리드타임이 필요. 5~20Gi 볼륨에서 90%는 여유가 거의 없어 critical 분리 |
+| 로그 ERROR 급증 (`log-error-spike.yaml`) | `> 5` (5분 윈도우), 주석은 "분당 5건"으로 불일치 | `> 10` (5분 윈도우 ≈ 2건/분), 주석 정정 | 기존 5/5분 = 1건/분은 과민. 주석/실제값 불일치도 바로잡음 |
+| 최소 트래픽 게이트 (`latency.yaml`, `http-error-rate.yaml`) | `>= 0.2 req/s` | `>= 0.5 req/s` | p99·비율 통계 표본 안정성 — 5분 150건을 공통 하한으로 |
+
+`severity: critical` 라벨은 현재 notification policy가 severity로 분기하지 않아 표시상으로만 의미가 있다 — 알림이 늘면 policy 세분화(`.harness/PLAN.md`).
+
+**영향받은 파일:** `monitoring/alerting/rules/{http-error-rate,latency,pvc-usage,log-error-spike}.yaml`, `.harness/ARCHITECTURE.md`, `docs/adr/0001-observability-stack.md`.
+
 ## 2026-08-29 — `로그 ERROR 급증` 규칙에 reduce 단계 추가
 
 Phase 2 실행 중 `로그 ERROR 급증` 규칙이 계속 `health: error`로 남아 `DatasourceError` 알림을 발화했다. 공교롭게 그 알림이 RCA Agent로 전달됐고, **Agent가 원인을 정확히 진단했다**:

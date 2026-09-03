@@ -40,5 +40,5 @@ Organization은 여러 서비스로 구성된 MSA(Book Service, Python RAG Servi
 - ~~Prometheus/Loki 데이터 보존 기간과 PVC 스토리지 용량~~ → 해소 (Prometheus 15d/20Gi 유지, Loki는 S3 전환 후 14d — `docs/adr/0004-loki-s3-storage.md`)
 - ~~Grafana 외부 노출 방식(Ingress)과 인증 방식~~ → 해소 (AWS Load Balancer Controller/ALB Ingress, 인증은 Grafana 기본 admin 계정. 도메인/ACM 인증서 없어 우선 HTTP만 — 확보되면 HTTPS 전환, `.harness/PLAN.md` 참고)
 - ~~시크릿 관리 방식 최종 확정~~ → `docs/adr/0003-argocd-gitops.md`에서 해소 (External Secrets Operator + AWS Secrets Manager)
-- 알림 규칙(threshold) 초기값 튜닝 — 트래픽 규모 파악 전이므로 러프한 기본값으로 시작
+- 알림 규칙(threshold) 초기값 튜닝 — 트래픽 규모 파악 전이라 러프한 기본값으로 시작했고, 2026-09-03 SLO/목표값 기준으로 1차 정리(5xx 2% / p99 1s·librarian·discovery 제외 / PVC 80·90% 2단계 / 로그 ERROR 5분 10건 / 게이트 0.5 req/s — `.harness/DECISIONS.md`). 실트래픽 분포 확인 후 경험값 보정은 `.harness/PLAN.md` "실측 후 재검증"이 소유
 - ~~GitOps 도구(ArgoCD/Flux) 도입 여부~~ → `docs/adr/0003-argocd-gitops.md`에서 해소 (ArgoCD)
