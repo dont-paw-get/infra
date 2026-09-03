@@ -107,11 +107,11 @@ Grafana Alerting 발화(webhook)를 받아 Bedrock 기반으로 원인을 분석
 
   | 서비스 | `application` | ServiceMonitor (name / ns) | 메트릭 포트·경로 | 실 스크레이핑 확인 |
   |---|---|---|---|---|
-  | backend-auth | `backend-auth` | `backend-auth` / `dpyb-auth-dev` | port `http`(8000) · `/metrics` | ❌ dev 배포 후 확인 |
-  | backend-book | `backend-book` | `backend-book` / `dpyb-book-dev` | port `metrics`(8081, 별도 관리 포트 · ALB 미노출) · `/actuator/prometheus` | ❌ dev 배포 후 확인 |
-  | backend-librarian | `backend-librarian` | `backend-librarian` / `dpyb-librarian-dev` | `/actuator/prometheus` (비-Spring, Micrometer 호환 이름) | ❌ dev 배포 후 확인 |
-  | backend-record | `backend-record` | `backend-record` / `dpyb-record-dev` | `/actuator/prometheus` (Micrometer 호환) | ❌ dev 배포 후 확인 |
-  | backend-discovery | `backend-discovery` | `backend-discovery` / `dpyb-discovery-dev` | `/actuator/prometheus` (Micrometer 모방) | ❌ dev 배포 후 확인 |
+  | backend-auth | `backend-auth` | `backend-auth` / `dpyb-auth-dev` | port `http`(8000) · `/metrics` | ✅ `UP` (2026-09-03) |
+  | backend-book | `backend-book` | `backend-book` / `dpyb-book-dev` | port `metrics`(8081, 별도 관리 포트 · ALB 미노출) · `/actuator/prometheus` | ✅ `UP` (2026-09-03, 아래 주 참고) |
+  | backend-librarian | `backend-librarian` | `backend-librarian` / `dpyb-librarian-dev` | `/actuator/prometheus` (비-Spring, Micrometer 호환 이름) | ✅ `UP` (2026-09-03) |
+  | backend-record | `backend-record` | `backend-record` / `dpyb-record-dev` | `/actuator/prometheus` (Micrometer 호환) | ✅ `UP` (2026-09-03) |
+  | backend-discovery | `backend-discovery` | `backend-discovery` / `dpyb-discovery-dev` | `/actuator/prometheus` (Micrometer 모방) | ✅ `UP` (2026-09-03) |
 
-  Prometheus는 `serviceMonitorSelectorNilUsesHelmValues: false`라 이 네임스페이스들의 ServiceMonitor를 라벨 제약 없이 인식한다. 배포 후 `Status > Targets`에서 `serviceMonitor/<ns>/<name>` 이 `UP`인지, Grafana에서 `http_server_requests_seconds_bucket{application="<svc>"}` 이 조회되는지 확인이 남아 있다(`.harness/PLAN.md`).
-- **미해결:** Loki 스트림 라벨 `app`(Alloy가 `app.kubernetes.io/name`에서 채움)이 각 서비스에서 `<svc>`와 일치하는지는 미확인 — `로그 ERROR 급증` 규칙이 `by (app)`로 집계하므로 서비스 파드에 `app.kubernetes.io/name: <svc>` 라벨이 필요하다. `trace_id`는 JSON 로그 필드로만 존재(라벨 승격 안 함).
+  Prometheus는 `serviceMonitorSelectorNilUsesHelmValues: false`라 이 네임스페이스들의 ServiceMonitor를 라벨 제약 없이 인식한다. 2026-09-03 dev 실측: 5개 타겟 전부 `UP`, `http_server_requests_seconds_count`/`_bucket{application="backend-<svc>"}` 5개 서비스 조회 확인. backend-book은 최초 확인 시 관리 포트 `:8081/actuator/prometheus`에 Spring Security가 걸려 `HTTP 401`(`DOWN`)이었으나 backend-book 저장소에서 무인증 허용으로 수정·dev 머지 후 `UP` 전환.
+- Loki 스트림 라벨 `app`(Alloy가 `app.kubernetes.io/name`에서 채움)이 5개 서비스에서 `backend-<svc>`로 잡히는 것을 2026-09-03 확인 — 파드에 `app.kubernetes.io/name: backend-<svc>` 존재, `로그 ERROR 급증` 규칙의 `by (app)` 집계가 서비스별로 동작한다. `trace_id`는 JSON 로그 필드로만 존재(라벨 승격 안 함).

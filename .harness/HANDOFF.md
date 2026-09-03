@@ -12,11 +12,21 @@ CLIAR-238 실측(같은 날 앞 항목, 별도 브랜치 `CLIAR-238-app-level-�
 
 **부수 발견 → CLIAR-261로 처리:** `p99 레이턴시 초과` 규칙이 idle 서비스(backend-discovery)에 `Pending`. 트래픽이 적으면 느린 요청 1건이 5분 윈도우 p99를 통째로 끌어올림. 5xx 에러율도 동일 취약. 사용자에게 설명 후 "2번 방식(최소 트래픽 게이트)"으로 고치기로 결정. 사용자가 티켓 261로 브랜치 `CLIAR-261-p99-레이턴시-초과-설정-완화`를 develop에서 새로 만들어 전환.
 
-**CLIAR-261 구현(이 브랜치):** `monitoring/alerting/rules/latency.yaml`·`http-error-rate.yaml` 두 규칙 refId A에 `and sum(rate(http_server_requests_seconds_count[5m])) by (application) >= 0.2` 게이트 추가(5xx는 division을 괄호로 묶음), 두 규칙 `noDataState: NoData`→`OK`. 규칙 파일 상단에 CLIAR-261 주석. 검증: `kubectl kustomize monitoring/alerting` ConfigMap 7개 유지·쿼리 반영, 두 게이트 쿼리를 라이브 Prometheus에 실행 `status: success`(현재 전 서비스 `<0.2 req/s`라 빈 결과 = 의도대로).
+**CLIAR-261 구현:** `monitoring/alerting/rules/latency.yaml`·`http-error-rate.yaml` 두 규칙 refId A에 `and sum(rate(http_server_requests_seconds_count[5m])) by (application) >= 0.2` 게이트 추가(5xx는 division을 괄호로 묶음), 두 규칙 `noDataState: NoData`→`OK`. 규칙 파일 상단에 CLIAR-261 주석. 검증: `kubectl kustomize monitoring/alerting` ConfigMap 7개 유지·쿼리 반영, 두 게이트 쿼리를 라이브 Prometheus에 실행 `status: success`(현재 전 서비스 `<0.2 req/s`라 빈 결과 = 의도대로).
 
-**커밋(이 브랜치, `CLIAR-261-...`):** 규칙 2파일 + `.harness/STATE.md`(CLIAR-207·254 실측 완료 + CLIAR-261 항목) + `.harness/PLAN.md`(CLIAR-207·254 배포 후 검증 섹션 제거, "알림 규칙 튜닝"에 CLIAR-261 항목) + `.harness/ARCHITECTURE.md`(알림 절 최소 트래픽 게이트 서술) + 이 HANDOFF. CLIAR-238 실측 문서 변경은 별도 브랜치 `CLIAR-238-app-level-알림-실측-반영`에 커밋됨(별도 PR).
+**커밋/머지:** CLIAR-261은 브랜치 `CLIAR-261-p99-레이턴시-초과-설정-완화`(규칙 2파일 + `.harness/STATE.md`·`PLAN.md`·`ARCHITECTURE.md`·이 HANDOFF)로 커밋 → **PR #14로 develop 머지 완료**. CLIAR-238 실측 문서 변경은 별도 브랜치 `CLIAR-238-app-level-알림-실측-반영`(아래 항목)로 분리 — 그 브랜치를 develop(CLIAR-261 머지분 포함)와 머지하며 `HANDOFF.md`/`PLAN.md` 충돌을 이 커밋에서 해소(양쪽 세션 로그 유지, PLAN은 양쪽 섹션 제거 모두 반영).
 
-**다음 세션이 이어받을 것:** (1) 두 브랜치 각각 PR → develop 머지(HANDOFF.md prepend가 겹쳐 2번째 머지 시 사소한 충돌 가능 — 트리비얼). (2) 머지 후 `grafana-alerting` sync → 두 규칙 `health: ok`, 게이트 동작, `DatasourceNoData` 미발생 확인. (3) 게이트값 0.2·threshold는 실트래픽 쌓인 뒤 튜닝.
+**다음 세션이 이어받을 것:** (1) `CLIAR-238-app-level-알림-실측-반영` PR → develop 머지. (2) 머지 후 `grafana-alerting` sync → `http-p99-latency`/`http-5xx-error-rate` `health: ok`, 게이트 동작, `DatasourceNoData` 미발생 확인. (3) 게이트값 0.2·threshold는 실트래픽 쌓인 뒤 튜닝.
+
+## 2026-09-03 — CLIAR-238 app-level 알림 재배포 dev 실측 검증
+
+사용자가 PLAN "1. CLIAR-238 app-level 알림 재배포 검증(가장 시급)"의 실측을 요청. 세션 시작 시 CLIAR-238 커밋(B·C·D)은 이미 PR #12로 develop 머지된 상태였고(HEAD 39c854d → 세션 중 CLIAR-254 PR #13 머지로 48d8d66까지 진행), CLIAR-238 관련 이 저장소 변경은 전부 반영돼 있어 실측만 남아 있었다. `scripts/aws-mfa-login.sh`로 dev(dpyb-dev) 자격증명 갱신 후 port-forward로 확인.
+
+**검증 결과 — 5/5 통과:** `grafana-alerting` ArgoCD app `Synced`/`Healthy`(ConfigMap 7종). Prometheus Targets: 처음엔 4/5 — **backend-book만 `DOWN`(`server returned HTTP status 401`)**. 클러스터 내부에서 `http://backend-book.dpyb-book-dev.svc.cluster.local:8081/actuator/prometheus` 직접 호출도 401 — 관리 포트(8081)에 Spring Security가 걸려 있었다(나머지 4개는 앱 포트에 무인증 노출). 이 저장소 범위 밖이라 사용자에게 넘김 → 사용자가 backend-book 저장소에서 무인증 허용으로 수정·dev 머지 → 02:09 ArgoCD sync·02:15 파드 교체(이미지 `85d9feb2`→`526e6b6f`) 후 재확인: `/actuator/prometheus` HTTP 200, 타겟 `UP`. 최종 5개 전부 `UP`, `http_server_requests_seconds_count`/`_bucket{application="backend-<svc>"}` 5개 조회 확인.
+
+Grafana provisioned alert-rule **6종 전부 `health: ok`/`state: inactive`**(`http-5xx-error-rate`/`http-p99-latency` 포함, `/api/prometheus/grafana/api/v1/rules`). Loki 스트림 라벨 `app`=`backend-<svc>` 5개 확인(파드에 `app.kubernetes.io/name` 존재 → `로그 ERROR 급증` `by (app)` 정상). 로그량도 instant `count_over_time` 재측정 시 정상(auth 712·book 43·librarian 1.1k·record 1.2k·discovery 0 줄/h). **정정: 지난 세션 보고의 "backend-auth 로그량 ~332k줄/시간"은 range 쿼리 합산 아티팩트로 인한 측정 오류였다** — 실제로는 문제없음(auth 파드도 02:15 교체돼 사용자 로그 필터링 설정은 반영됨). threshold(5xx 5%/p99 1s)는 실트래픽이 거의 없어(5xx 샘플은 record `502` 소수) 튜닝 보류.
+
+반영: 브랜치 `CLIAR-238-app-level-알림-실측-반영`(develop에서 분기)에 커밋 — `.harness/STATE.md` 실측 완료 항목, `.harness/ARCHITECTURE.md` "서비스 저장소와의 경계" 표 "실 스크레이핑 확인" 열 전부 `✅ UP (2026-09-03)` + Loki `app` 라벨 "미해결"→확인 완료, `.harness/PLAN.md` "app-level 알림 재배포 배포 후 검증" 섹션 + 낡은 "커밋 분할" 소절 제거·"서비스 저장소 연동" 서술 갱신, 이 HANDOFF 항목. dev 머지는 별도 PR.
 
 ## 2026-09-02 (3) — 서비스 저장소 5곳 계측 회신 반영 + app-level 알림 재배포(B·D)
 
