@@ -1,8 +1,9 @@
 # Grafana Alerting provisioning: p99 레이턴시 초과
-# TODO(open issue, ADR-0001): threshold(1s)는 러프한 초기값. 트래픽 파악 후 튜닝.
-# refId A의 `and sum(rate(...count[5m])) by (application) >= 0.2`는 최소 트래픽 게이트다(CLIAR-261).
-# 5분에 60건(0.2 req/s) 미만인 서비스는 표본이 적어 p99가 요청 1건에 통째로 끌려가므로 평가에서 제외한다.
-# 이 게이트값(0.2)도 실트래픽 분포 확인 후 튜닝 대상.
+# threshold(1s)·게이트(0.5 req/s)는 SLO 기준 1차 정리값(2026-09-03). 실트래픽 분포 확인 후 재조정 대상 — .harness/PLAN.md, DECISIONS.md.
+# refId A의 `and sum(rate(...count[5m])) by (application) >= 0.5`는 최소 트래픽 게이트다(CLIAR-261에서 0.2로 도입, SLO 재조정 시 0.5로 상향).
+# 5분에 150건(0.5 req/s) 미만인 서비스는 표본이 적어 p99가 요청 1건에 통째로 끌려가므로 평가에서 제외한다.
+# backend-librarian·backend-discovery는 Bedrock 호출 경로가 섞여 application 단위 p99가 상시 수 초이므로 이 규칙에서 제외한다.
+# 두 서비스의 일반 API 레이턴시는 별도 URI 단위 SLO 규칙으로 다룬다(미구현, .harness/PLAN.md).
 apiVersion: 1
 
 groups:
@@ -24,10 +25,10 @@ groups:
             model:
               expr: |
                 histogram_quantile(0.99,
-                  sum(rate(http_server_requests_seconds_bucket[5m])) by (le, application)
+                  sum(rate(http_server_requests_seconds_bucket{application!~"backend-librarian|backend-discovery"}[5m])) by (le, application)
                 )
                 and
-                sum(rate(http_server_requests_seconds_count[5m])) by (application) >= 0.2
+                sum(rate(http_server_requests_seconds_count{application!~"backend-librarian|backend-discovery"}[5m])) by (application) >= 0.5
               instant: true
           - refId: C
             relativeTimeRange:

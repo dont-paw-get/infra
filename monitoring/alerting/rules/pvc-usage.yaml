@@ -1,5 +1,6 @@
 # Grafana Alerting provisioning: PVC 사용률 초과
-# TODO(open issue, ADR-0001): threshold(85%)는 러프한 초기값.
+# threshold(warning 80% / critical 90%)는 SLO 기준 1차 정리값(2026-09-03). EBS 확장은 리드타임이 필요하므로
+# warning으로 여유를 두고, 90%는 여유가 거의 없는 상태라 critical + 짧은 for로 분리한다. — .harness/DECISIONS.md
 apiVersion: 1
 
 groups:
@@ -33,10 +34,43 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [0.85]
+                    params: [0.80]
         noDataState: NoData
         execErrState: Error
         labels:
           severity: warning
         annotations:
-          summary: "{{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} PVC 사용률이 85%를 초과했습니다"
+          summary: "{{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} PVC 사용률이 80%를 초과했습니다"
+
+      - uid: pvc-usage-critical
+        title: "PVC 사용률 위험"
+        condition: C
+        for: 5m
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: |
+                kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes
+              instant: true
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.90]
+        noDataState: NoData
+        execErrState: Error
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} PVC 사용률이 90%를 초과했습니다"

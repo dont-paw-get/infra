@@ -22,14 +22,19 @@ ALB Ingress로 노출은 확정했지만(2026-08-26, 사용자 확인) 도메인
 - [ ] 트래픽 `< 0.2 req/s`인 서비스가 두 규칙 평가에서 빠지고 `DatasourceNoData` 알림이 안 뜨는지(`noDataState: OK`)
 - [ ] 실트래픽(`>= 0.2 req/s`)이 붙은 서비스에서는 정상 평가되는지
 
-### 그 외 threshold 재조정 (트래픽 규모 파악 후)
+### 러프한 초기값 SLO 기준 재조정 — 배포 후 검증 (구현 완료)
 
-- [ ] 러프한 초기값 재조정 (게이트값 `0.2 req/s` 포함):
-  - `monitoring/alerting/rules/http-error-rate.yaml` — 5xx 에러율 5%
-  - `monitoring/alerting/rules/latency.yaml` — p99 레이턴시 1초
-  - `monitoring/alerting/rules/pvc-usage.yaml` — PVC 사용률 85%
-  - `monitoring/alerting/rules/log-error-spike.yaml` — 분당 ERROR 로그 5건
-- [ ] 알림이 늘어나면 `monitoring/alerting/policies/notification-policy.yaml`의 단일 라우팅을 서비스/심각도별로 세분화
+구현·로컬 검증 완료(`STATE.md`, `.harness/DECISIONS.md` 2026-09-03). 브랜치 `alerting-threshold-SLO-재조정`(Jira 티켓 없음). 남은 건 dev 반영 후 확인.
+
+- [ ] `grafana-alerting` sync 후 규칙 7개(PVC 2단계 포함)가 `health: ok`로 로드되는지 — `curl -u admin:<pw> localhost:3000/api/v1/provisioning/alert-rules`에 `pvc-usage-critical` 신규 uid 확인
+- [ ] p99 규칙 쿼리의 `application!~"backend-librarian|backend-discovery"` 필터가 파싱 OK, 두 서비스가 대상에서 빠지는지
+- [ ] 게이트 `>= 0.5` 상향 후에도 `DatasourceNoData`가 안 뜨는지(`noDataState: OK`)
+
+### 실측 후 재검증 (트래픽 쌓인 뒤)
+
+- [ ] 실트래픽 분포(요청률·실제 p99·5xx 비율·ERROR 로그율) 확인 후 위 SLO 기준값을 경험값으로 보정
+- [ ] librarian·discovery URI 단위 레이턴시 SLO 규칙 신설 (LLM 경로 제외한 일반 API만 별도 임계)
+- [ ] 알림이 늘어나면 `monitoring/alerting/policies/notification-policy.yaml`의 단일 라우팅을 서비스/심각도별로 세분화 (PVC critical 등 severity 분기 활용)
 
 ## RCA Agent 후속 개선
 
