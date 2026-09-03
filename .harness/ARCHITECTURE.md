@@ -73,6 +73,7 @@ Git 커밋이 곧 배포다. ArgoCD 자체 설치는 이 저장소 범위 밖(�
 - provisioning 배포 메커니즘: `monitoring/alerting/kustomization.yaml`(`configMapGenerator`)이 각 YAML을 `grafana_alert=1` 라벨의 ConfigMap으로 만들고, ArgoCD(`monitoring/argocd/alerting.yaml`)가 이를 동기화 → Grafana sidecar(`grafana-sc-alerts` 컨테이너)가 `/etc/grafana/provisioning/alerting/`에 쓰고 Grafana가 reload API를 호출한다.
 - 규칙이 실제 로드됐는지 확인: `curl -u admin:<pw> localhost:3000/api/v1/provisioning/alert-rules`(포트포워드 후) 가 `[]`가 아니어야 한다. Grafana 컨테이너 로그의 `logger=provisioning.alerting`/`errorMessageID=alerting.*`도 확인.
 - `pod-oom-killed` 규칙은 최근성 바운드를 갖는다: `kube_pod_container_status_last_terminated_reason{reason="OOMKilled"}`는 파드 오브젝트가 살아있는 한 계속 1이라, `and on (namespace, pod, container) (time() - kube_pod_container_status_last_terminated_timestamp < 900)`로 최근 15분 내 OOM 종료만 발화하도록 제한한다(2026-09-02 `tempo-0`가 하루 넘게 정상 Running인데도 계속 firing한 문제, CLIAR-254). 복구 15분 후 series A가 비어 `noDataState: OK`로 자동 해소되고, 반복 OOM은 timestamp가 갱신되며 재발화한다.
+- `http-p99-latency`/`http-5xx-error-rate` 규칙은 최소 트래픽 게이트를 갖는다: refId A 쿼리 뒤에 `and sum(rate(http_server_requests_seconds_count[5m])) by (application) >= 0.2`를 붙여 5분에 60건(0.2 req/s) 미만인 서비스는 평가에서 제외한다(2026-09-03 dev 실측에서 idle 서비스가 느린 요청 1건에 p99가 튀어 `Pending`으로 잡힌 문제, CLIAR-261). 두 규칙 모두 `noDataState: OK` — 게이트로 전 서비스가 빠져 refId A가 비면 `NoData`는 `DatasourceNoData` 알림을 내므로 "트래픽 없음 = 알림 없음"으로 처리한다. 게이트값 `0.2`와 threshold(p99 1s / 5xx 5%)는 실트래픽 분포 확인 후 튜닝 대상.
 
 ## 시크릿
 
