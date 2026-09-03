@@ -2,6 +2,18 @@
 
 세션마다 무엇을 했는지 (append-only 서술형 로그, 최신이 위). 단계별 완료 요약은 `STATE.md`, 결정 이유는 `DECISIONS.md`/`docs/adr/` 참고.
 
+## 2026-09-03 — CLIAR-238 app-level 알림 재배포 dev 실측 검증
+
+사용자가 PLAN "1. CLIAR-238 app-level 알림 재배포 검증(가장 시급)"의 실측을 요청. 세션 시작 시 CLIAR-238 커밋(B·C·D)은 이미 PR #12로 develop 머지된 상태였고(HEAD 39c854d → 세션 중 CLIAR-254 PR #13 머지로 48d8d66까지 진행), CLIAR-238 관련 이 저장소 변경은 전부 반영돼 있어 실측만 남아 있었다. `scripts/aws-mfa-login.sh`로 dev(dpyb-dev) 자격증명 갱신 후 port-forward로 확인.
+
+**검증 결과 — 5/5 통과:** `grafana-alerting` ArgoCD app `Synced`/`Healthy`(ConfigMap 7종). Prometheus Targets: 처음엔 4/5 — **backend-book만 `DOWN`(`server returned HTTP status 401`)**. 클러스터 내부에서 `http://backend-book.dpyb-book-dev.svc.cluster.local:8081/actuator/prometheus` 직접 호출도 401 — 관리 포트(8081)에 Spring Security가 걸려 있었다(나머지 4개는 앱 포트에 무인증 노출). 이 저장소 범위 밖이라 사용자에게 넘김 → 사용자가 backend-book 저장소에서 무인증 허용으로 수정·dev 머지 → 02:09 ArgoCD sync·02:15 파드 교체(이미지 `85d9feb2`→`526e6b6f`) 후 재확인: `/actuator/prometheus` HTTP 200, 타겟 `UP`. 최종 5개 전부 `UP`, `http_server_requests_seconds_count`/`_bucket{application="backend-<svc>"}` 5개 조회 확인.
+
+Grafana provisioned alert-rule **6종 전부 `health: ok`/`state: inactive`**(`http-5xx-error-rate`/`http-p99-latency` 포함, `/api/prometheus/grafana/api/v1/rules`). Loki 스트림 라벨 `app`=`backend-<svc>` 5개 확인(파드에 `app.kubernetes.io/name` 존재 → `로그 ERROR 급증` `by (app)` 정상). 로그량도 instant `count_over_time` 재측정 시 정상(auth 712·book 43·librarian 1.1k·record 1.2k·discovery 0 줄/h). **정정: 지난 세션 보고의 "backend-auth 로그량 ~332k줄/시간"은 range 쿼리 합산 아티팩트로 인한 측정 오류였다** — 실제로는 문제없음(auth 파드도 02:15 교체돼 사용자 로그 필터링 설정은 반영됨). threshold(5xx 5%/p99 1s)는 실트래픽이 거의 없어(5xx 샘플은 record `502` 소수) 튜닝 보류.
+
+반영: 브랜치 `CLIAR-238-app-level-알림-실측-반영`(develop에서 분기)에 커밋 — `.harness/STATE.md` 실측 완료 항목, `.harness/ARCHITECTURE.md` "서비스 저장소와의 경계" 표 "실 스크레이핑 확인" 열 전부 `✅ UP (2026-09-03)` + Loki `app` 라벨 "미해결"→확인 완료, `.harness/PLAN.md` "app-level 알림 재배포 배포 후 검증" 섹션 + 낡은 "커밋 분할" 소절 제거·"서비스 저장소 연동" 서술 갱신, 이 HANDOFF 항목. dev 머지는 별도 PR.
+
+**다음 세션이 이어받을 것:** (1) 이 브랜치 PR → develop 머지. (2) CLIAR-207·254 배포 후 검증, CLIAR-261 알림 규칙 게이트는 `CLIAR-261-p99-레이턴시-초과-설정-완화` 브랜치에서 이어짐. (3) 알림 threshold 튜닝은 실트래픽 쌓인 뒤.
+
 ## 2026-09-02 (3) — 서비스 저장소 5곳 계측 회신 반영 + app-level 알림 재배포(B·D)
 
 사용자가 5개 서비스(backend-auth/book/librarian/record/discovery) Claude Code의 계측 구현 회신을 붙여넣음. 요지: **5곳 모두 Micrometer 표준 메트릭 이름**(`http_server_requests_seconds_count`/`_bucket`/`_sum`, 라벨 `application`/`method`/`uri`/`status`/`outcome`)이라 **알림 규칙 쿼리 수정 불필요**. 각 저장소 dev overlay에만 `ServiceMonitor` 존재(base/prod 불변). backend-book은 별도 관리 포트 `:8081/actuator/prometheus`(ALB에 `/`로 8080만 노출되므로 actuator 분리 — 앞서 사용자와 논의한 대로), backend-auth는 `:8000/metrics`. 5곳 다 아직 dev 실스크레이핑 미확인(배포 후 Prometheus Targets 확인 예정).

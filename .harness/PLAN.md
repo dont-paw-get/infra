@@ -24,44 +24,6 @@
 - [ ] `tempo-0`가 OOM된 지 15분+ 경과 후 `파드 OOMKilled` 알림이 자동 해소(resolved)되는지 Discord/Grafana에서 확인
 - [ ] `tempo` ArgoCD app sync 후 `tempo-0`가 limit 1Gi로 재기동(`kubectl -n monitoring get pod tempo-0 -o jsonpath='{.spec.containers[0].resources}'`)되고 Running 안정 확인
 
-## app-level 알림 재배포 배포 후 검증 (CLIAR-238 브랜치 계속)
-
-**배경:** CLIAR-238로 RCA Agent trace tool·트레이스 소스 ADR(`docs/adr/0008`)·시나리오 테스트 손질(A·C)
-완료. `backend-*` 5개 서비스(auth/book/librarian/record/discovery)가 Micrometer 계측 + dev overlay
-`ServiceMonitor`를 각 저장소에서 구현 완료(2026-09-02 회신, 5개 모두 Micrometer 표준 이름 → 알림 규칙
-쿼리 무수정). 이 저장소 쪽 반영(B·D)도 2026-09-02 완료 — 남은 건 dev 배포 후 실측 검증뿐.
-
-**이 저장소에서 한 것 (미커밋):**
-
-- B: `monitoring/alerting/kustomization.yaml`에 `grafana-alerting-http-error-rate`/`grafana-alerting-latency`
-  configMapGenerator 재등록(ConfigMap 5→7, `kubectl kustomize` 확인). 규칙 파일(`rules/*.yaml`)은 무수정.
-  `.harness/ARCHITECTURE.md` 알림 절 "배포 제외" 서술 → "5종 전부 배포"로 갱신.
-- D: `docs/adr/0001` "결과"에 알림/트레이스 요구사항 구체화, `.harness/ARCHITECTURE.md` "서비스 저장소와의
-  경계"에 서비스별 ServiceMonitor/메트릭 현황 표 추가.
-
-**남은 검증 (dev 배포 후 — 커밋·머지 후 서비스들이 auto-sync되면):**
-
-- [ ] Prometheus `Status > Targets`에서 `serviceMonitor/dpyb-<svc>-dev/backend-<svc>` 5개가 `UP`인지 확인
-  (auth `:8000/metrics`, book `:8081/actuator/prometheus`, librarian/record/discovery `/actuator/prometheus`)
-- [ ] Grafana Explore에서 `http_server_requests_seconds_bucket{application="backend-book"}` 등 조회 확인
-- [ ] `curl -u admin:<pw> localhost:3000/api/v1/provisioning/alert-rules`에 `http-5xx-error-rate`/
-  `http-p99-latency` 2종이 추가돼 규칙 6종이 되고 `health: ok`인지 확인
-- [ ] 각 서비스 파드에 `app.kubernetes.io/name: backend-<svc>` 라벨이 있어 Loki 스트림 라벨 `app`이
-  `<svc>`로 잡히는지 (`로그 ERROR 급증` 규칙이 `by (app)` 집계 — 없으면 서비스 저장소에 요청)
-- [ ] threshold(5xx 5% / p99 1s)는 러프한 초기값 — 트래픽 실측 후 "알림 규칙 튜닝" 섹션에서 조정
-- [ ] 실제 trace를 근거로 쓰는 레이턴시/5xx Phase 2 시나리오 추가 — "RCA Agent 후속 개선"의
-  "Tempo 연동 배포 후 검증" 항목이 소유
-
-### 커밋 분할 (제안, 미커밋 — 사용자 요청 시)
-
-1. `feat(alerting): [CLIAR-238] HTTP 5xx·p99 레이턴시 알림 재배포` — `kustomization.yaml` + ARCHITECTURE 알림 절
-2. `docs: [CLIAR-238] RCA Agent Tempo 소스 ADR + 서비스 저장소 계측 요구 반영` — ADR-0008/0002/0007/0001,
-   ARCHITECTURE 서비스 경계 표
-3. `test(rca-scenarios): [CLIAR-238] 트레이스 시나리오 추가 및 문서 갱신` — `test/rca-scenarios/*`
-
-(prod overlay의 trace endpoint는 서비스 저장소가 관례 기본값을 두고 있음 — prod 클러스터에 Collector가
-배포되면 실제 값 전달 필요. 이 저장소 범위 밖, `.harness/BACKLOG.md`에 기록)
-
 ## Grafana HTTPS 전환 (도메인/ACM 인증서 확보 후)
 
 ALB Ingress로 노출은 확정했지만(2026-08-26, 사용자 확인) 도메인/ACM 인증서가 없어 현재 HTTP만 열려 있다.
@@ -99,7 +61,8 @@ Agent는 Phase 1·2 검증을 마치고 실사용 가능한 상태다(`.harness/
 
 `backend-*` 5개 서비스의 `ServiceMonitor`/Micrometer/트레이스/구조화 로그 구현은 2026-09-02 완료
 (각 서비스 저장소, `.harness/STATE.md`·`.harness/ARCHITECTURE.md` 표). `http-error-rate`/`latency`
-알림도 재배포됨. dev 실측 검증만 위 "app-level 알림 재배포 배포 후 검증" 섹션에 남아 있다.
+알림도 재배포됐고 dev 실측 검증(5개 ServiceMonitor `UP`, 규칙 6종 `health: ok`, Loki `app` 라벨)도
+2026-09-03 완료 — `.harness/STATE.md` 참고.
 
 - [ ] 신규 HTTP 서비스가 추가되면 같은 계측(Micrometer `application` 태그 + `ServiceMonitor` +
   OTLP endpoint + JSON 로그 `trace_id`/`level`)을 요청 — 명령 text는 2026-09-02 세션 응답 참고
