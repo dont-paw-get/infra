@@ -3,6 +3,71 @@
 아직 끝나지 않은 계획과 체크리스트만 남긴다. 완료되면 항목을 지우고 `.harness/STATE.md`에 단계 한 줄로 반영한다.
 배경/근거는 각 항목에 표시된 파일 참고 (주로 `docs/adr/0001-observability-stack.md`).
 
+## RCA Agent 시나리오 테스트 커버리지 완성 (우선순위: 최상)
+
+**상태: 확정 (2026-09-06 사용자 컨펌) — 티켓 `CLIAR-272`, 단계 1~4 한 번에 진행.**
+
+**배경 (2026-09-06 점검):** 배포된 알림 규칙 7개(CrashLoopBackOff / OOMKilled / PVC 80%·90% /
+로그 ERROR 급증 / HTTP 5xx 에러율 / p99 레이턴시) 중 실제로 Discord 알림 + RCA 후속 메시지까지
+재현 가능한 것은 4종(CrashLoop / OOM / PVC / 로그ERROR)뿐이다.
+
+- **HTTP 5xx / p99 레이턴시**: 규칙은 배포됐고 backend 5개 서비스도 계측됐으나 (1) 최소 트래픽
+  게이트 `>= 0.5 req/s`를 넘기는 부하가 dev에 없고(전 서비스 idle `< 0.2 req/s`) (2) 실제 5xx/지연을
+  내는 워크로드가 없어 발화시킬 수 없다. Phase 2 매니페스트도 없다.
+- **Phase 1 합성 payload**: `crashloop-firing` / `http-5xx-firing` 2종뿐 — OOMKilled / PVC /
+  로그ERROR / p99는 RCA→Discord 경로 스모크조차 안 된다.
+
+**목표:** 배포된 알림 규칙 7개 전부에 대해 (a) Phase 1 합성 스모크 또는 (b) Phase 2 실제 발화 중
+최소 하나로 Discord 알림 + RCA 후속 메시지를 재현할 수 있게 한다. **알림 규칙 파일은 변경하지
+않는다** (기존 규칙을 그대로 발화시키는 것이 목적).
+
+### 1. Phase 1 합성 payload 커버리지 완성 (클러스터 무변경, 저비용 — 빠른 성과)
+
+- [ ] `test/rca-scenarios/payloads/oomkilled-firing.json` — `alertname: 파드 OOMKilled`, 라벨
+      namespace/pod/container
+- [ ] `test/rca-scenarios/payloads/pvc-usage-firing.json` — `alertname: PVC 사용률 초과`, 라벨
+      namespace/persistentvolumeclaim
+- [ ] `test/rca-scenarios/payloads/log-error-spike-firing.json` — `alertname: 로그 ERROR 급증`, 라벨 app
+- [ ] `test/rca-scenarios/payloads/p99-latency-firing.json` — `alertname: p99 레이턴시 초과`, 라벨 application
+- [ ] `test/rca-scenarios/payloads/http-5xx-firing.json` summary 문구 `5%` → `2%` 정정(규칙 현행값)
+- [ ] 4종 `json.load` 검증, `test/rca-scenarios/README.md` Phase 1 실행 절차에 반영
+
+### 2. Phase 2 — HTTP 5xx / p99 레이턴시 실제 발화 시나리오
+
+알림 발화에는 Prometheus가 테스트 서비스를 스크레이핑해야 하므로 `ServiceMonitor`/`PodMonitor` CR이
+필요하다. 관측 스택 정책상 이 CR은 서비스 저장소 소유이나, 여기서 만들 CR은
+`test/rca-scenarios/phase2/`에 두는 **테스트 전용·수동 apply·확인 후 삭제** 리소스다(ArgoCD/CI 대상
+아님). 이 예외는 2026-09-06 사용자 컨펌으로 허용됨 — `docs/adr/0001` 미결정/경계 항목에 한 줄 명시.
+
+- [ ] `test/rca-scenarios/phase2/E-http-5xx.yaml` — 의도적으로 HTTP 500을 반환하는 최소 서비스
+      (Deployment + Service) + Micrometer 호환 `http_server_requests_seconds_*` 노출 +
+      `ServiceMonitor` + 부하 생성 Job(≥ 1 req/s 지속으로 게이트 초과)
+- [ ] `test/rca-scenarios/phase2/F-p99-latency.yaml` — 응답을 ~2초 지연시키는 최소 서비스 + 동일
+      계측 + 부하 Job. `application` 라벨은 규칙 제외 목록(`backend-librarian|backend-discovery`)과
+      겹치지 않게 지정
+- [ ] `test/rca-scenarios/phase2/README.md` 시나리오 표에 E·F 추가, "5xx/p99 제외" 서술 갱신
+- [ ] `docs/adr/0001-observability-stack.md`에 테스트 전용 `ServiceMonitor` 예외를 한 줄 기록
+
+### 3. (2의 후속) trace 근거 포함 검증
+
+- [ ] E·F 테스트 서비스가 OTLP span(`otel-collector.monitoring.svc.cluster.local:4318`) +
+      `trace_id` JSON 로그를 emit하도록 확장 (busybox 불가 — 경량 앱 이미지 필요)
+- [ ] 발화 시 RCA Agent가 `search_traces` → `get_trace`로 병목·예외 span을 근거에 인용하는지 확인
+- [ ] "RCA Agent 후속 개선"의 "Tempo 연동(CLIAR-238) 배포 후 검증" 항목과 통합
+
+### 4. 문서 정합성 정리
+
+- [ ] `test/rca-scenarios/phase2/C-log-error-spike.yaml` 주석 `> 5`·"분당 5건" → 5분 10건
+- [ ] `test/rca-scenarios/phase2/D-pvc-usage.yaml` 주석 `> 0.85` → 80%/90% 2단계, 900Mi fill이
+      두 규칙 다 발화시킴을 명시
+
+### 검증
+
+- payload: `python -c "import json"` 로드 / 매니페스트: `kubectl apply --dry-run=client` + YAML 문법
+- 알림 규칙 파일 무변경 → helm/kustomize 렌더링 영향 없음
+- 실제 발화(Phase 2)는 사용자가 dev에서 수행 — 실제 Discord 알림 발생
+- 작업 브랜치: `CLIAR-272-RCA-Agent-후속-개선` (현재 브랜치, 신규 분기 없음)
+
 ## Grafana HTTPS 전환 (도메인/ACM 인증서 확보 후)
 
 ALB Ingress로 노출은 확정했지만(2026-08-26, 사용자 확인) 도메인/ACM 인증서가 없어 현재 HTTP만 열려 있다.
