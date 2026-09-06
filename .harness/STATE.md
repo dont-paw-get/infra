@@ -144,3 +144,9 @@
   - `log-error-spike.yaml`: 5분 윈도우 `5건 → 10건`, "분당 5건" 주석/실제값 불일치 정정
   - 동반 갱신: `.harness/ARCHITECTURE.md` 알림 절(threshold·게이트 서술값, p99 제외 서비스), `docs/adr/0001` 미결정 항목, `.harness/DECISIONS.md`
   - 검증: `kubectl kustomize monitoring/alerting` ConfigMap 7개 유지, `python yaml.safe_load`로 규칙 7개 파싱·threshold 값 확인. 배포 후 검증은 `.harness/PLAN.md`
+- [x] RCA Agent 시나리오 테스트 커버리지 완성 (2026-09-06, CLIAR-272) — 배포된 알림 규칙 7개 전부를 Phase 1(합성) 또는 Phase 2(실제 발화)로 Discord 알림 + RCA 후속 메시지까지 재현 가능하게. **알림 규칙 파일 무변경.** 실제 발화·Discord 확인은 사용자의 dev 작업(`.harness/PLAN.md` "배포 후 검증")
+  - Phase 1 합성 payload 4종 신규: `test/rca-scenarios/payloads/`에 `oomkilled-firing`/`pvc-usage-firing`/`log-error-spike-firing`/`p99-latency-firing`.json (기존 `crashloop-firing`/`http-5xx-firing`과 합쳐 규칙 7개 커버). `http-5xx-firing.json` summary 문구 `5%`→`2%` 정정. `test/rca-scenarios/README.md`에 6종 payload↔알림명↔주요 tool 표 추가
+  - Phase 2 실제 발화 시나리오 2종 신규: `test/rca-scenarios/phase2/E-http-5xx.yaml`(HTTP 500 반환), `F-p99-latency.yaml`(~1.5초 지연). 순수 stdlib 파이썬 목 HTTP 서비스(ConfigMap 마운트)가 Micrometer 호환 `http_server_requests_seconds_*`(버킷 포함)를 `/actuator/prometheus`로 노출 + 요청마다 OTLP span(에러 span은 exception 이벤트)·`trace_id` JSON 로그 emit. busybox 부하 컨테이너가 최소 트래픽 게이트(`>= 0.5 req/s`) 초과. E는 `로그 ERROR 급증`도 부수 발화
+  - 테스트 전용 `ServiceMonitor` 예외: E·F의 `ServiceMonitor` CR을 `test/rca-scenarios/phase2/`에 포함 — ArgoCD/CI 대상 아닌 수동 apply·삭제 리소스라 소유권 원칙(ADR-0001 결정 #4)과 무관. `docs/adr/0001-observability-stack.md` "결과"에 예외 한 줄 기록
+  - 문서 정합성: `C-log-error-spike.yaml` 주석 `>5`→5분 10건, `D-pvc-usage.yaml` 주석 `>0.85`→80%/90% 2단계(900MiB fill이 두 규칙 다 발화), `phase2/README.md` 시나리오 표·전제조건·트러블슈팅에 E·F 추가
+  - 검증: payload 6종 `json.load` 통과, E·F YAML `yaml.safe_load_all` + 임베드 `server.py` `py_compile` 통과, 목 서비스 로컬 기동해 `/actuator/prometheus` 노출 형식·slow 모드 레이턴시 버킷(le="2") 확인. `kubectl --dry-run`은 dev 자격증명 만료로 미실행

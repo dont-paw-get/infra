@@ -33,6 +33,7 @@ Organization은 여러 서비스로 구성된 MSA(Book Service, Python RAG Servi
 
 - 이 저장소는 `monitoring/` 하위에 kube-prometheus-stack, Loki, Alloy의 Helm values와 Grafana Alerting(연락처/정책/규칙) 설정만 갖는다.
 - 각 서비스 저장소는 `/actuator/prometheus`(Micrometer) 또는 동등한 엔드포인트를 노출하고, 자신의 배포 매니페스트에 `ServiceMonitor` CR을 포함해야 한다. `HTTP 5xx 에러율`/`p99 레이턴시` 알림 규칙은 `http_server_requests_seconds_count`/`_bucket`에 `application` 라벨이 있어야 동작한다(Micrometer 공통 태그). 트레이스는 `OTEL_EXPORTER_OTLP_ENDPOINT`(Collector), 구조화 로그에는 `trace_id`·`level` 필드가 필요하며, `OTEL_SERVICE_NAME`은 `application` 태그와 일치시킨다. 현재 반영 현황은 `.harness/ARCHITECTURE.md` "서비스 저장소와의 경계" 표 참고.
+- 결정 #4의 예외: `test/rca-scenarios/phase2/`의 RCA Agent 테스트 시나리오(`E-http-5xx.yaml`/`F-p99-latency.yaml`)는 목 서비스를 스크레이핑하기 위해 `ServiceMonitor` CR을 이 저장소에 포함한다. 이 CR은 ArgoCD/CI 동기화 대상이 아니고 테스트 중에만 수동 `kubectl apply`/`delete`되는 일회성 리소스이므로 소유권 원칙과 상충하지 않는다(2026-09-06 확인).
 - Discord 웹훅 URL 등 시크릿은 저장소에 커밋하지 않는다 (`secrets/README.md` 참고).
 
 ## 미결정 (추후 논의 필요)

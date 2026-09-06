@@ -1,0 +1,45 @@
+{
+  "receiver": "discord-webhook",
+  "status": "firing",
+  "orgId": 1,
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "PVC 사용률 초과",
+        "grafana_folder": "Cluster Alerts",
+        "namespace": "rca-test",
+        "persistentvolumeclaim": "rca-test-fill",
+        "severity": "warning"
+      },
+      "annotations": {
+        "summary": "rca-test/rca-test-fill PVC 사용률이 80%를 초과했습니다"
+      },
+      "startsAt": "2026-09-06T09:00:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "",
+      "fingerprint": "smoke-test-pvc-usage-0001",
+      "silenceURL": "",
+      "dashboardURL": "",
+      "panelURL": "",
+      "valueString": "[ var='A' labels={namespace=rca-test, persistentvolumeclaim=rca-test-fill} value=0.87 ]"
+    }
+  ],
+  "groupLabels": {
+    "alertname": "PVC 사용률 초과",
+    "namespace": "rca-test"
+  },
+  "commonLabels": {
+    "alertname": "PVC 사용률 초과",
+    "namespace": "rca-test",
+    "severity": "warning"
+  },
+  "commonAnnotations": {},
+  "externalURL": "",
+  "version": "1",
+  "groupKey": "{}/{alertname=\"PVC 사용률 초과\"}:{namespace=\"rca-test\"}",
+  "truncatedAlerts": 0,
+  "title": "[FIRING:1] PVC 사용률 초과 (rca-test)",
+  "state": "alerting",
+  "message": "**Firing**\n\nValue: A=0.87\nLabels:\n - alertname = PVC 사용률 초과\n - namespace = rca-test\n - persistentvolumeclaim = rca-test-fill"
+}

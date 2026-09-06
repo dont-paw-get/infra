@@ -103,7 +103,7 @@ Grafana Alerting 발화(webhook)를 받아 Bedrock 기반으로 원인을 분석
 ## 서비스 저장소와의 경계
 
 - 이 저장소는 수집·저장·시각화·알림 파이프라인만 소유한다.
-- `ServiceMonitor`/`PodMonitor` CR, 메트릭 엔드포인트 노출, 구조화 로깅, OpenTelemetry SDK 설정은 각 서비스 저장소(`backend-book` 등) 책임 — 이 저장소에는 두지 않는다.
+- `ServiceMonitor`/`PodMonitor` CR, 메트릭 엔드포인트 노출, 구조화 로깅, OpenTelemetry SDK 설정은 각 서비스 저장소(`backend-book` 등) 책임 — 이 저장소에는 두지 않는다. **예외:** `test/rca-scenarios/phase2/E-http-5xx.yaml`·`F-p99-latency.yaml`(RCA Agent 5xx/p99 발화 테스트, CLIAR-272)은 목 서비스 스크레이핑용 테스트 전용 `ServiceMonitor`를 포함한다 — ArgoCD/CI 대상 아닌 수동 apply·삭제 리소스(`docs/adr/0001` "결과").
 - **dev trace endpoint (전 서비스 공통):** `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.monitoring.svc.cluster.local:4318`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, `OTEL_METRICS_EXPORTER=none`/`OTEL_LOGS_EXPORTER=none`(Collector는 traces pipeline만). `OTEL_SERVICE_NAME`은 각 서비스의 `application` 메트릭 태그·JSON 로그 `service` 필드와 동일하게 맞춘다.
 - **서비스별 `ServiceMonitor`/메트릭 현황** (2026-09-02, CLIAR-238 회신 — 각 서비스 dev overlay에만 존재, base/prod 불변). 5개 모두 Micrometer 표준(`http_server_requests_seconds_count`/`_bucket`/`_sum`, 라벨 `application`/`method`/`uri`/`status`/`outcome`)이라 `http-error-rate`/`latency` 규칙 쿼리는 무수정:
 

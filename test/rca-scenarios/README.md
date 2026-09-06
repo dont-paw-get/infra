@@ -47,10 +47,24 @@ Discord에 후속 메시지를 보내는 파이프라인을 검증한다. 배경
    ```
    ./send-webhook.sh crashloop-firing   # -> {"received":1,"queued":1} (응답까지 수십 초 걸릴 수 있음)
    ```
-   트레이스 tool 경로까지 확인하려면 `HTTP 5xx 에러율 초과` 페이로드도 보낸다 — system prompt가
-   이 알림에서 `search_traces`/`get_trace`를 호출하도록 안내한다:
+   배포된 알림 규칙 7개에 대응하는 firing 페이로드가 모두 있다 — 각각 RCA→Discord 경로를
+   독립적으로 스모크할 수 있다:
+
+   | 페이로드 | 알림명(alertname) | RCA가 호출하는 주요 tool |
+   |---|---|---|
+   | `crashloop-firing` | 파드 CrashLoopBackOff | `query_prometheus_range`, `query_loki` |
+   | `oomkilled-firing` | 파드 OOMKilled | `query_prometheus_range`, `query_loki` |
+   | `pvc-usage-firing` | PVC 사용률 초과 | `query_prometheus_range` |
+   | `log-error-spike-firing` | 로그 ERROR 급증 | `query_loki`, (trace_id 있으면) `get_trace` |
+   | `http-5xx-firing` | HTTP 5xx 에러율 초과 | `query_prometheus_range`, `search_traces`, `get_trace` |
+   | `p99-latency-firing` | p99 레이턴시 초과 | `query_prometheus_range`, `search_traces`, `get_trace` |
+
    ```
-   ./send-webhook.sh http-5xx-firing    # -> {"received":1,"queued":1}
+   ./send-webhook.sh oomkilled-firing        # -> {"received":1,"queued":1}
+   ./send-webhook.sh pvc-usage-firing        # -> {"received":1,"queued":1}
+   ./send-webhook.sh log-error-spike-firing  # -> {"received":1,"queued":1}
+   ./send-webhook.sh http-5xx-firing         # -> {"received":1,"queued":1}
+   ./send-webhook.sh p99-latency-firing      # -> {"received":1,"queued":1}
    ```
 
 5. Agent 로그로 흐름 확인:
@@ -60,7 +74,7 @@ Discord에 후속 메시지를 보내는 파이프라인을 검증한다. 배경
    `analyze()` 진입 → 도구 호출(`query_prometheus_range` / `query_loki`, 5xx 페이로드면
    `search_traces` / `get_trace`도) → Bedrock 응답이 보여야 한다.
 
-6. Discord 채널에서 `RCA: 파드 CrashLoopBackOff`(및 `RCA: HTTP 5xx 에러율 초과`) 임베드 메시지 도착 확인.
+6. Discord 채널에서 `RCA: <알림명>` 임베드 메시지가 보낸 페이로드마다 도착하는지 확인.
 
 ### Windows PowerShell 주의
 
@@ -79,19 +93,20 @@ curl.exe -sS -X POST http://localhost:8080/webhook `
 CLIAR-207로 관측 스택에 OTel Collector + Tempo가 추가됐고, CLIAR-238로 Agent가
 `search_traces`(TraceQL 검색) / `get_trace`(trace_id 하나의 span 트리 요약) tool을 갖게 됐다.
 
-- Phase 1(합성 페이로드)에는 대응하는 실제 trace가 없다. `http-5xx-firing` 페이로드를 보내면
-  Agent가 `search_traces { status = error }`를 시도하지만 `조건에 맞는 trace가 없습니다`를 받는다 —
+- Phase 1(합성 페이로드)에는 대응하는 실제 trace가 없다. `http-5xx-firing` / `p99-latency-firing`
+  페이로드를 보내면 Agent가 `search_traces`를 시도하지만 `조건에 맞는 trace가 없습니다`를 받는다 —
   tool이 예외 없이 실패 문자열을 반환하고 분석이 계속되는지(부분 실패 허용)를 확인하는 것이 목적이다.
-- 실제 trace를 근거로 쓰는지는 Phase 2에서 서비스 저장소 계측(`OTEL_EXPORTER_OTLP_ENDPOINT`,
-  JSON 로그 `trace_id`)이 붙은 뒤 레이턴시/5xx 시나리오로 확인한다 — `.harness/PLAN.md` 참고.
+- 실제 trace를 근거로 쓰는지는 Phase 2의 `E-http-5xx.yaml` / `F-p99-latency.yaml`(OTLP span +
+  `trace_id` 로그를 내는 테스트 서비스)로 확인한다 — `phase2/README.md` 참고.
 - 로그↔트레이스 연결(로그 상세의 `trace_id` → Tempo trace 이동)은 Grafana에서 직접 확인한다
   (`.harness/PLAN.md` "CLIAR-207 tracing stack 배포 후 검증").
 
 ### 예상 한계
 
-`rca-test`/`rca-test-svc` 네임스페이스·서비스는 실재하지 않으므로 Agent의 Prometheus/Loki/Tempo
-쿼리는 모두 빈 결과를 돌려준다. 따라서 보고서는 "관련 메트릭/로그/trace 없음, 원인 확정 불가"
-수준이다 — 파이프라인·tool 배선 검증에는 충분하다. 의미 있는 분석 품질은 Phase 2(실제 장애 주입)에서 확인한다.
+합성 페이로드의 `rca-test*` 네임스페이스·서비스·`app`은 실재하지 않으므로 Agent의
+Prometheus/Loki/Tempo 쿼리는 모두 빈 결과를 돌려준다. 따라서 보고서는 "관련 메트릭/로그/trace
+없음, 원인 확정 불가" 수준이다 — 파이프라인·tool 배선·부분 실패 허용 검증에는 충분하다.
+의미 있는 분석 품질은 Phase 2(실제 장애 주입)에서 확인한다.
 
 ### 비용
 
@@ -100,5 +115,5 @@ firing 페이로드 1회 = Bedrock(Claude Sonnet 5) 분석 1회 ≈ 수십 센�
 
 ## Phase 2 — 실제 장애 주입 E2E
 
-시나리오 A~D 검증 완료(2026-08-29). 절차와 시나리오 매니페스트는 `phase2/README.md` 참고.
-트레이스를 근거로 쓰는 레이턴시/5xx 시나리오 추가는 서비스 저장소 계측 후 — `.harness/PLAN.md`.
+시나리오 A~D 검증 완료(2026-08-29), 트레이스를 근거로 쓰는 E(5xx)·F(p99)는 CLIAR-272로 추가.
+절차와 시나리오 매니페스트는 `phase2/README.md` 참고.
