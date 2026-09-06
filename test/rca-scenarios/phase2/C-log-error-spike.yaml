@@ -1,9 +1,9 @@
 # 시나리오 C — 로그 ERROR 급증
 #
-# 5초마다 JSON 구조화 로그(level=ERROR)를 stdout으로 출력 → 분당 12건 (임계 5건 초과).
+# 5초마다 JSON 구조화 로그(level=ERROR)를 stdout으로 출력 → 5분 윈도우 ~60건 (임계 10건 초과).
 # 전제: loki-0 Running + Alloy DaemonSet 정상 (로그가 Loki까지 도달해야 함).
 # 알림: monitoring/alerting/rules/log-error-spike.yaml  "로그 ERROR 급증"  (for 5m)
-#   expr: sum by (app) (count_over_time({namespace=~".+"} | json | level="ERROR" [5m])) > 5
+#   expr: sum by (app) (count_over_time({namespace=~".+"} | json | level="ERROR" [5m])) > 10
 #   Loki 라벨 app 은 Alloy가 파드의 app.kubernetes.io/name 에서 채운다 → app=rca-test-logspike
 # 기대: apply 후 ~5-6분이면 발화 → Discord 원본 알림 + "RCA: 로그 ERROR 급증"
 #

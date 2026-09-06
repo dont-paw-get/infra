@@ -2,6 +2,40 @@
 
 세션마다 무엇을 했는지 (append-only 서술형 로그, 최신이 위). 단계별 완료 요약은 `STATE.md`, 결정 이유는 `DECISIONS.md`/`docs/adr/` 참고.
 
+## 2026-09-06 — CLIAR-272 RCA Agent 시나리오 테스트 커버리지 완성
+
+사용자가 "RCA Agent 각 시나리오를 테스트해서 디스코드 알림을 띄워보고 싶다, 시나리오 정리하고 현재
+가능한지, 불가하면 개선안"을 요청. 점검 결과 배포된 알림 규칙 7개 중 Phase 2로 실제 발화 가능한 건
+4종(CrashLoop/OOM/PVC/로그ERROR)뿐이고, HTTP 5xx·p99는 규칙은 배포됐으나 최소 트래픽 게이트를
+넘길 부하와 실제 5xx/지연 워크로드가 없어 발화 불가. Phase 1 합성 payload도 2종뿐이었다.
+
+`.harness/PLAN.md`에 계획 초안 작성 → 사용자 컨펌(① 테스트 전용 ServiceMonitor 예외 허용 ② 현재
+브랜치 `CLIAR-272-RCA-Agent-후속-개선`가 티켓 브랜치 ③ 단계 1~4 한 번에). 계획 확정 커밋(`12ea0a2`)
+후 구현.
+
+**구현 (미커밋 — 사용자 요청 시 커밋):**
+- Phase 1 payload 4종 신규(`test/rca-scenarios/payloads/`): `oomkilled-firing`/`pvc-usage-firing`/
+  `log-error-spike-firing`/`p99-latency-firing`.json. `http-5xx-firing.json` summary `5%`→`2%`.
+  `test/rca-scenarios/README.md`에 payload 6종↔알림명↔tool 표.
+- Phase 2 `E-http-5xx.yaml`/`F-p99-latency.yaml` 신규. 순수 stdlib 파이썬 목 HTTP 서비스(ConfigMap
+  마운트, `python:3.12-slim`)가 500 반환(E)/~1.5초 지연(F) + Micrometer 호환
+  `http_server_requests_seconds_*`(버킷) `/actuator/prometheus` 노출 + 요청마다 OTLP JSON span
+  (에러 span exception 이벤트) `otel-collector:4318/v1/traces` POST + `trace_id` JSON 로그.
+  busybox `load` 컨테이너가 병렬 wget(E 4 / F 8)으로 게이트(`>= 0.5 req/s`) 초과. E·F에 테스트 전용
+  `ServiceMonitor` 포함.
+- 문서 정합성: `C`/`D` 매니페스트 주석 threshold 정정(로그 10건, PVC 80/90%), `phase2/README.md`
+  시나리오 표·전제·트러블슈팅에 E·F, `docs/adr/0001` "결과"에 테스트 ServiceMonitor 예외 한 줄,
+  `.harness/STATE.md`·`ARCHITECTURE.md`·`PLAN.md`(확정 섹션→"배포 후 검증"으로 축소) 갱신.
+
+검증: payload 6종 `json.load`, E·F `yaml.safe_load_all` + 임베드 `server.py` `py_compile`, 목 서비스
+로컬 기동해 `/actuator/prometheus` 형식·slow 레이턴시 버킷 확인. `kubectl --dry-run`은 dev 자격증명
+만료로 미실행(YAML 문법 검증으로 갈음, 알림 규칙 파일 무변경이라 helm/kustomize 영향 없음).
+
+**다음 세션이 이어받을 것:** (1) CLIAR-272 구현분 커밋(사용자 요청 시) — payload 5개 + phase2 E/F +
+C/D 주석 + README 2개 + ADR-0001 + `.harness/*`. (2) `.harness/PLAN.md` "RCA Agent 시나리오 테스트
+커버리지 — 배포 후 검증" — 사용자가 dev에서 Phase 1 4종 전송 + Phase 2 E/F apply, RCA가 trace를
+근거에 인용하는지 확인. (3) 목 서비스는 단일 span이라 병목 분해는 서비스 저장소 실계측 트래픽 필요.
+
 ## 2026-09-03 (2) — CLIAR-207·254 배포 후 실측 + CLIAR-261 p99/5xx 최소 트래픽 게이트
 
 CLIAR-238 실측(같은 날 앞 항목, 별도 브랜치 `CLIAR-238-app-level-알림-실측-반영`) 이어서. 사용자가 PLAN의 CLIAR-207(tracing 스택)·CLIAR-254(OOM 규칙+Tempo 메모리) "배포 후 검증"을 둘 다 실측 요청.

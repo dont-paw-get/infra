@@ -1,0 +1,43 @@
+{
+  "receiver": "discord-webhook",
+  "status": "firing",
+  "orgId": 1,
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "로그 ERROR 급증",
+        "grafana_folder": "Cluster Alerts",
+        "app": "rca-test-logspike",
+        "severity": "warning"
+      },
+      "annotations": {
+        "summary": "rca-test-logspike 서비스에서 ERROR 로그가 급증했습니다"
+      },
+      "startsAt": "2026-09-06T09:00:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "",
+      "fingerprint": "smoke-test-log-error-spike-0001",
+      "silenceURL": "",
+      "dashboardURL": "",
+      "panelURL": "",
+      "valueString": "[ var='B' labels={app=rca-test-logspike} value=48 ], [ var='C' labels={app=rca-test-logspike} value=1 ]"
+    }
+  ],
+  "groupLabels": {
+    "alertname": "로그 ERROR 급증"
+  },
+  "commonLabels": {
+    "alertname": "로그 ERROR 급증",
+    "app": "rca-test-logspike",
+    "severity": "warning"
+  },
+  "commonAnnotations": {},
+  "externalURL": "",
+  "version": "1",
+  "groupKey": "{}/{alertname=\"로그 ERROR 급증\"}",
+  "truncatedAlerts": 0,
+  "title": "[FIRING:1] 로그 ERROR 급증 (rca-test-logspike)",
+  "state": "alerting",
+  "message": "**Firing**\n\nValue: B=48, C=1\nLabels:\n - alertname = 로그 ERROR 급증\n - app = rca-test-logspike"
+}

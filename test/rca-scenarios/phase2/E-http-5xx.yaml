@@ -1,0 +1,265 @@
+# 시나리오 E — HTTP 5xx 에러율 초과 (+ 로그 ERROR 급증 부수 발화)
+#
+# 순수 stdlib 파이썬으로 만든 목 HTTP 서비스가 모든 요청에 500을 반환하면서
+# Micrometer 호환 http_server_requests_seconds_* 메트릭을 /actuator/prometheus 로 노출하고,
+# 요청마다 OTLP span(exception 이벤트 포함) + trace_id JSON 로그를 남긴다.
+# 부하 생성 컨테이너(사이드카)가 ~4 req/s 를 지속해 최소 트래픽 게이트(>= 0.5 req/s)를 넘긴다.
+#
+# 알림: monitoring/alerting/rules/http-error-rate.yaml  "HTTP 5xx 에러율 초과"  (for 5m)
+#   expr(요약): sum(rate(count{status=~"5.."}[5m])) by (application)
+#              / sum(rate(count[5m])) by (application)  > 0.02
+#              and sum(rate(count[5m])) by (application) >= 0.5
+#   application 라벨: rca-test-5xx  (규칙 제외 목록 backend-librarian|backend-discovery 와 무관)
+#
+# 부수: 500 요청마다 level=ERROR JSON 로그를 남기므로 "로그 ERROR 급증"(app=rca-test-5xx)도 함께 발화한다
+#       (B-oomkill 이 CrashLoopBackOff 를 함께 발화하는 것과 같은 성격). RCA 가 두 알림을 각각 분석한다.
+#
+# 기대: apply 후 ~7-10분이면 발화 → Discord 원본 알림 + "RCA: HTTP 5xx 에러율 초과"
+#   RCA 가 search_traces '{ status = error }' → get_trace 로 SimulatedServerError span 을 근거에 인용하는지 확인.
+#
+# 전제: OTel Collector + Tempo 스택 배포됨 (monitoring/otel-collector, monitoring/tempo).
+#       backend-* 서비스가 Micrometer 계측돼 있어 http_server_requests_seconds_* 규칙이 배포된 상태.
+#
+# 정리: kubectl delete -f test/rca-scenarios/phase2/E-http-5xx.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rca-test-5xx-src
+  namespace: rca-test
+  labels:
+    rca-test: "true"
+data:
+  server.py: |
+    import json, os, secrets, threading, time, urllib.request
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    APP = os.environ.get("APP_NAME", "rca-test-mock")
+    MODE = os.environ.get("MODE", "error")            # "error" -> 500, "slow" -> 지연된 200
+    DELAY_MS = int(os.environ.get("DELAY_MS", "1500"))
+    ERROR_RATIO = float(os.environ.get("ERROR_RATIO", "1.0"))
+    OTLP = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").rstrip("/")
+
+    _BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10]
+    _lock = threading.Lock()
+    _count, _sum, _bucket, _seq = {}, {}, {}, 0
+
+    def _record(status, elapsed):
+        with _lock:
+            _count[status] = _count.get(status, 0) + 1
+            _sum[status] = _sum.get(status, 0.0) + elapsed
+            b = _bucket.setdefault(status, [0] * len(_BUCKETS))
+            for i, edge in enumerate(_BUCKETS):
+                if elapsed <= edge:
+                    b[i] += 1
+
+    def _metrics():
+        out = ["# TYPE http_server_requests_seconds histogram"]
+        with _lock:
+            for status in sorted(_count):
+                outcome = "SERVER_ERROR" if status.startswith("5") else "SUCCESS"
+                tags = f'application="{APP}",method="GET",uri="/",outcome="{outcome}",status="{status}"'
+                b = _bucket.get(status, [0] * len(_BUCKETS))
+                for i, edge in enumerate(_BUCKETS):
+                    out.append(f'http_server_requests_seconds_bucket{{{tags},le="{edge}"}} {b[i]}')
+                out.append(f'http_server_requests_seconds_bucket{{{tags},le="+Inf"}} {_count[status]}')
+                out.append(f'http_server_requests_seconds_count{{{tags}}} {_count[status]}')
+                out.append(f'http_server_requests_seconds_sum{{{tags}}} {_sum[status]:.6f}')
+        return "\n".join(out) + "\n"
+
+    def _export_span(elapsed, is_error, msg):
+        if not OTLP:
+            return ""
+        end = time.time_ns()
+        start = end - int(elapsed * 1e9)
+        trace_id = secrets.token_hex(16)
+        span = {
+            "traceId": trace_id, "spanId": secrets.token_hex(8), "name": "GET /", "kind": 2,
+            "startTimeUnixNano": str(start), "endTimeUnixNano": str(end),
+            "attributes": [
+                {"key": "http.request.method", "value": {"stringValue": "GET"}},
+                {"key": "http.route", "value": {"stringValue": "/"}},
+                {"key": "http.response.status_code",
+                 "value": {"intValue": str(500 if is_error else 200)}},
+            ],
+            "status": {"code": 2 if is_error else 1},
+        }
+        if is_error:
+            span["events"] = [{
+                "name": "exception", "timeUnixNano": str(end),
+                "attributes": [
+                    {"key": "exception.type", "value": {"stringValue": "SimulatedServerError"}},
+                    {"key": "exception.message", "value": {"stringValue": msg}},
+                ],
+            }]
+        body = json.dumps({"resourceSpans": [{
+            "resource": {"attributes": [
+                {"key": "service.name", "value": {"stringValue": APP}}]},
+            "scopeSpans": [{"scope": {"name": "rca-test-mock"}, "spans": [span]}],
+        }]}).encode()
+        try:
+            urllib.request.urlopen(urllib.request.Request(
+                f"{OTLP}/v1/traces", data=body,
+                headers={"Content-Type": "application/json"}, method="POST"), timeout=2).read()
+        except Exception as exc:
+            print(json.dumps({"level": "WARN", "msg": f"otlp export failed: {exc}"}), flush=True)
+        return trace_id
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *_a):
+            pass
+
+        def _send(self, code, body):
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            global _seq
+            if self.path.startswith("/actuator/prometheus") or self.path == "/metrics":
+                self._send(200, _metrics().encode())
+                return
+            if self.path in ("/healthz", "/livez", "/readyz"):
+                self._send(200, b'{"status":"ok"}')
+                return
+            with _lock:
+                _seq += 1
+                seq = _seq
+            is_error = MODE == "error" and (seq % 100) < int(ERROR_RATIO * 100)
+            t0 = time.monotonic()
+            if MODE == "slow":
+                time.sleep(DELAY_MS / 1000.0)
+            elapsed = time.monotonic() - t0
+            status = "500" if is_error else "200"
+            msg = f"simulated {'server error' if is_error else 'ok'} seq={seq}"
+            trace_id = _export_span(elapsed, is_error, msg)
+            _record(status, elapsed)
+            print(json.dumps({
+                "level": "ERROR" if is_error else "INFO", "msg": msg, "application": APP,
+                "status": status, "trace_id": trace_id,
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }), flush=True)
+            self._send(500 if is_error else 200,
+                       json.dumps({"status": status, "trace_id": trace_id}).encode())
+
+    ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rca-test-5xx
+  namespace: rca-test
+  labels:
+    rca-test: "true"
+    app: rca-test-5xx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rca-test-5xx
+  template:
+    metadata:
+      labels:
+        app: rca-test-5xx
+        app.kubernetes.io/name: rca-test-5xx
+    spec:
+      containers:
+        - name: app
+          image: python:3.12-slim
+          command: ["python", "/app/server.py"]
+          env:
+            - name: APP_NAME
+              value: rca-test-5xx
+            - name: MODE
+              value: error
+            - name: ERROR_RATIO
+              value: "1.0"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector.monitoring.svc.cluster.local:4318
+          ports:
+            - name: metrics
+              containerPort: 8080
+          volumeMounts:
+            - name: src
+              mountPath: /app
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+        - name: load
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              TARGET="http://localhost:8080/"
+              i=0
+              while [ $i -lt 4 ]; do
+                ( while true; do wget -q -O /dev/null -T 5 "$TARGET" || true; sleep 1; done ) &
+                i=$((i + 1))
+              done
+              wait
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
+      volumes:
+        - name: src
+          configMap:
+            name: rca-test-5xx-src
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rca-test-5xx
+  namespace: rca-test
+  labels:
+    rca-test: "true"
+    app: rca-test-5xx
+spec:
+  selector:
+    app: rca-test-5xx
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: metrics
+---
+# 테스트 전용 ServiceMonitor — 관측 스택 정책상 ServiceMonitor CR 은 서비스 저장소 소유이나,
+# 이 CR 은 ArgoCD/CI 대상이 아닌 phase2 수동 apply·확인 후 삭제 리소스다 (2026-09-06 사용자 컨펌,
+# docs/adr/0001-observability-stack.md "결과" 참고). Prometheus 는 serviceMonitorSelectorNilUsesHelmValues:false
+# 라 라벨 제약 없이 이 ServiceMonitor 를 인식한다.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rca-test-5xx
+  namespace: rca-test
+  labels:
+    rca-test: "true"
+spec:
+  selector:
+    matchLabels:
+      app: rca-test-5xx
+  endpoints:
+    - port: metrics
+      path: /actuator/prometheus
+      interval: 15s
